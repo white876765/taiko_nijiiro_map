@@ -43,6 +43,10 @@ const changedIcon = L.icon({
   popupAnchor: [0, -20]
 });
 
+const searchBox = document.getElementById("searchBox");
+const prefFilter = document.getElementById("prefFilter");
+const stats = document.getElementById("stats");
+
 let addedIds = new Set();
 let changedIds = new Set();
 
@@ -52,17 +56,21 @@ function getSelectedFilters() {
 }
 
 function matchMachineFilter(m, filters) {
-  if (filters.length === 0) return true;
-  for (const f of filters) {
-    if (f === "1" && m === 1) return true;
-    if (f === "2" && m === 2) return true;
-    if (f === "3" && m === 3) return true;
-    if (f === "4" && m === 4) return true;
-    if (f === "5" && m === 5) return true;
-    if (f === "6-7" && m >= 6 && m <= 7) return true;
-    if (f === "8-9" && m >= 8 && m <= 9) return true;
+  if (!filters.length) return true;
+
+  for (let i = 0; i < filters.length; i++) {
+    const f = filters[i];
+
     if (f === "10+" && m >= 10) return true;
+
+    if (f.includes("-")) {
+      const [min, max] = f.split("-").map(Number);
+      if (m >= min && m <= max) return true;
+    } else if (Number(f) === m) {
+      return true;
+    }
   }
+
   return false;
 }
 
@@ -70,43 +78,39 @@ function matchMachineFilter(m, filters) {
 function renderMap() {
   cluster.clearLayers();
 
-  const keyword = document.getElementById("searchBox").value.toLowerCase();
-  const pref = document.getElementById("prefFilter").value;
+  const keyword = searchBox.value.toLowerCase();
+  const pref = prefFilter.value;
   const filters = getSelectedFilters();
 
   let count = 0;
   let total = 0;
   const bounds = [];
 
-  originalShops.forEach(shop => {
-    if (shop.lat == null || shop.lng == null) return;
-    if (pref !== "ALL" && shop.pref !== pref) return;
-    if (!matchMachineFilter(shop.machines, filters)) return;
-    if (keyword && !shop.name.toLowerCase().includes(keyword)) return;
+  for (let i = 0; i < originalShops.length; i++) {
+    const shop = originalShops[i];
+
+    if (!shop.lat || !shop.lng) continue;
+    if (pref !== "ALL" && shop.pref !== pref) continue;
+    if (!matchMachineFilter(shop.machines, filters)) continue;
+    if (keyword && !shop.name.toLowerCase().includes(keyword)) continue;
 
     let icon = normalIcon;
+    if (addedIds.has(shop.id)) icon = addedIcon;
+    else if (changedIds.has(shop.id)) icon = changedIcon;
 
-    if (addedIds.has(shop.id)) {
-      icon = addedIcon;
-    } else if (changedIds.has(shop.id)) {
-      icon = changedIcon;
-    }
+    const marker = L.marker([shop.lat, shop.lng], { icon })
+      .bindPopup(
+        `<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`
+      );
 
-    const marker = L.marker([shop.lat, shop.lng], { icon }).bindPopup(`<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`);
     cluster.addLayer(marker);
-
-    // const marker = L.marker([shop.lat, shop.lng])
-    //   .bindPopup(`<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`);
-
-    // cluster.addLayer(marker);
     bounds.push([shop.lat, shop.lng]);
 
     count++;
-    total += shop.machines ?? 0;
-  });
+    total += shop.machines || 0;
+  }
 
-  document.getElementById("stats").textContent =
-    `表示店舗数: ${count} / 台数合計: ${total}`;
+  stats.textContent = `表示店舗数: ${count} / 台数合計: ${total}`;
 
   if (pref !== "ALL" && bounds.length) {
     map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
@@ -116,9 +120,9 @@ function renderMap() {
 }
 
 map.on("click", () => {
-  if (window.innerWidth >= 768) return;
+  if (!isMobile()) return;
 
-  closeMobileUI();
+  closeMobilePanels();
 });
 
 ["controls", "updateNotice"].forEach(id => {
@@ -145,13 +149,49 @@ function enableMapInteraction() {
   map.keyboard.enable();
 }
 
-function closeMobileUI() {
-  if (window.innerWidth >= 768) return;
+function closeMobilePanels() {
+  if (!isMobile()) return;
 
   const controls = document.getElementById("controls");
+  const updateDetails = document.getElementById("updateDetails");
+  const notice = document.getElementById("updateNotice");
+
   if (controls) controls.style.display = "none";
 
+  if (updateDetails) {
+    updateDetails.style.display = "none";
+    const toggle = document.getElementById("updateToggle");
+    if (toggle) toggle.textContent = "▶ 表示する";
+  }
+
+  // ★ ここを追加
+  if (notice) notice.style.display = "block";
+
   enableMapInteraction();
+}
+
+function isMobile() {
+  return window.innerWidth < 768;
+}
+
+function isAnyPanelOpen() {
+  const controls = document.getElementById("controls");
+  const updateDetails = document.getElementById("updateDetails");
+
+  return (
+    controls?.style.display === "block" ||
+    updateDetails?.style.display === "block"
+  );
+}
+
+function updateMapInteractionState() {
+  if (!isMobile()) return;
+
+  if (isAnyPanelOpen()) {
+    disableMapInteraction();
+  } else {
+    enableMapInteraction();
+  }
 }
 
 // ===== イベント =====
@@ -174,23 +214,19 @@ document.getElementById("toggleControls").onclick = e => {
   e.stopPropagation();
 
   const c = document.getElementById("controls");
+  const notice = document.getElementById("updateNotice");
   const open = c.style.display === "block";
 
   c.style.display = open ? "none" : "block";
 
-  if (window.innerWidth < 768) {
-    open ? enableMapInteraction() : disableMapInteraction();
+  // ★ フィルタ開いてる間は通知を隠す
+  if (!open) {
+    notice.style.display = "none";
+  } else {
+    notice.style.display = "block";
   }
-};
 
-document.getElementById("updateToggle").onclick = e => {
-  e.stopPropagation();
-
-  const details = document.getElementById("updateDetails");
-  const open = details.style.display === "block";
-
-  details.style.display = open ? "none" : "block";
-  e.target.textContent = open ? "▶ 表示する" : "▼ 閉じる";
+  updateMapInteractionState();
 };
 
 // ===== JSON 読み込み =====
@@ -294,6 +330,27 @@ fetch("diff.json")
     renderMap();
   });
 
+const updateToggle = document.getElementById("updateToggle");
+const updateDetails = document.getElementById("updateDetails");
+const modal = document.getElementById("updateModal");
+const modalDetails = document.getElementById("modalDetails");
+const closeModal = document.getElementById("closeModal");
 
+// 「表示する」クリック
+updateToggle.addEventListener("click", (e) => {
+  e.stopPropagation();
+  modalDetails.innerHTML = updateDetails.innerHTML;
+  modal.style.display = "block";
+});
 
+// 背景クリックで閉じる
+modal.addEventListener("click", (e) => {
+  if (e.target === modal) {
+    modal.style.display = "none";
+  }
+});
 
+// ×ボタンで閉じる
+closeModal.addEventListener("click", () => {
+  modal.style.display = "none";
+});

@@ -78,22 +78,90 @@ html, body {
 }
 
 @media (max-width: 768px) {
+
   #controls {
     display: none;
-    max-width: 90vw;
-    top: 50px;
+    position: fixed;          /* ← absolute → fixed に変更 */
+    top: 60px;
+    left: 10px;               /* ← 左固定 */
+    width: 260px;             /* ← 固定幅にする */
+    
+    max-height: 70vh;
+    overflow-y: auto;
+
+    z-index: 1100;
+
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    padding: 12px;
   }
+
+  #updateNotice {
+    position: fixed;
+    top: 10px;
+    right: 10px;              /* ← 右固定 */
+    max-width: 45vw;          /* 画面幅に応じて縮む */
+    font-size: 12px;
+    z-index: 1200;
+  }
+
+  #updateDetails {
+    margin-top: 8px;
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+
   .mobile-only {
     display: block;
-    position: absolute;
+    position: fixed;          /* absolute → fixed */
     top: 10px;
     left: 10px;
-    z-index: 1100;
+    z-index: 1300;
+
     padding: 6px 10px;
     background: white;
     border-radius: 6px;
     box-shadow: 0 2px 6px rgba(0,0,0,.3);
   }
+}
+
+/* ========================= */
+/* 更新モーダル（暗転） */
+/* ========================= */
+#updateModal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 3000;
+}
+
+/* モーダル中身カード */
+#updateModalContent {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow-y: auto;
+
+  background: white;
+  padding: 20px;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+
+/* 閉じるボタン */
+#closeModal {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
 }
 
 </style>
@@ -137,20 +205,7 @@ html, body {
   </select>
 </div>
 
-<div id="updateNotice" style="
-  display:none;
-  position:absolute;
-  top:10px;
-  right:10px;
-  z-index:1200;
-  background:#fff3cd;
-  border:1px solid #ffeeba;
-  border-radius:6px;
-  padding:8px 10px;
-  font-size:13px;
-  max-width:320px;
-  box-shadow:0 2px 6px rgba(0,0,0,.2);
-">
+<div id="updateNotice" style="display:none;">
   <strong>📢 本日更新あり</strong>
 
   <!-- サマリー -->
@@ -179,6 +234,14 @@ html, body {
       word-break:break-word;
     "
   ></div>
+</div>
+
+<div id="updateModal">
+  <div id="updateModalContent">
+    <div id="closeModal">✕</div>
+    <h3>📢 本日の更新内容</h3>
+    <div id="modalDetails"></div>
+  </div>
 </div>
 
 <div id="map"></div>
