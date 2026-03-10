@@ -138,6 +138,36 @@ def write_diff_json(added, removed, machine_changed):
     with open("diff.json", "w", encoding="utf-8") as f:
         json.dump(diff, f, ensure_ascii=False, indent=2)
 
+def update_history(added, removed, machine_changed):
+    HISTORY = os.path.join(DATA_DIR, "updates.json")
+
+    today = date.today().isoformat()
+
+    today_diff = {
+        "added": added,
+        "removed": removed,
+        "machine_changed": machine_changed
+    }
+
+    # 既存履歴読み込み
+    if os.path.exists(HISTORY):
+        with open(HISTORY, encoding="utf-8") as f:
+            history = json.load(f)
+    else:
+        history = {}
+
+    # 今日の履歴追加
+    history[today] = today_diff
+
+    # 新しい順に並べる
+    history = dict(sorted(history.items(), reverse=True))
+
+    # 7日分だけ残す
+    history = dict(list(history.items())[:7])
+
+    with open(HISTORY, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
 def make_shop_id(shop):
     return f"{shop['pref']}|{shop['name']}|{shop['lat']}|{shop['lng']}"
 
@@ -214,5 +244,5 @@ added, removed, machine_changed = diff_shops(prev_shops, curr_shops)
 
 write_summary(added, removed, machine_changed)
 write_diff_json(added, removed, machine_changed)
-
+update_history(added, removed, machine_changed)
 

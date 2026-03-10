@@ -18,6 +18,54 @@ const map = L.map("map", { zoomControl: false }).setView([36.5, 138], 5);
 
 L.control.zoom({ position: "bottomright" }).addTo(map);
 
+// ===== 現在地ボタン =====
+const locateControl = L.control({ position: "bottomright" });
+
+locateControl.onAdd = function(map) {
+  const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+
+  div.innerHTML = `
+    <a href="#" title="現在地" id="locateBtn" style="font-size:18px;">◎</a>
+  `;
+
+  div.onclick = function(e) {
+    e.preventDefault();
+
+    map.locate({
+      setView: false,
+      enableHighAccuracy: true
+    });
+  };
+
+  return div;
+};
+
+locateControl.addTo(map);
+
+let currentMarker;
+
+map.on("locationfound", function(e) {
+
+  // 現在地へズーム
+  map.setView(e.latlng, 16);
+
+  if (currentMarker) {
+    map.removeLayer(currentMarker);
+  }
+
+  currentMarker = L.circleMarker(e.latlng, {
+    radius: 8,
+    color: "#007bff",
+    fillColor: "#007bff",
+    fillOpacity: 0.8
+  }).addTo(map);
+
+});
+
+map.on("locationerror", function() {
+  alert("位置情報を取得できませんでした");
+});
+
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap contributors"
 }).addTo(map);
@@ -49,6 +97,8 @@ const stats = document.getElementById("stats");
 
 let addedIds = new Set();
 let changedIds = new Set();
+
+let hasUpdateUI = false;
 
 // ===== フィルタ系 =====
 function getSelectedFilters() {
@@ -165,7 +215,7 @@ function closeMobilePanels() {
   }
 
   // ★ ここを追加
-  if (notice) notice.style.display = "block";
+  if (notice && hasUpdateUI) notice.style.display = "block";
 
   enableMapInteraction();
 }
@@ -192,6 +242,37 @@ function updateMapInteractionState() {
   } else {
     enableMapInteraction();
   }
+}
+
+function buildUpdateHTML(d){
+
+  const html = [];
+
+  if (d.added?.length) {
+    html.push("<strong>🟢追加店舗</strong><ul>");
+    d.added.forEach(s=>{
+      html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
+    });
+    html.push("</ul>");
+  }
+
+  if (d.removed?.length) {
+    html.push("<strong>🔴削除店舗</strong><ul>");
+    d.removed.forEach(s=>{
+      html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
+    });
+    html.push("</ul>");
+  }
+
+  if (d.machine_changed?.length) {
+    html.push("<strong>🟡台数変更</strong><ul>");
+    d.machine_changed.forEach(s=>{
+      html.push(`<li>【${s.pref ?? "不明"}】${s.name}：${s.before} → ${s.after}</li>`);
+    });
+    html.push("</ul>");
+  }
+
+  return html.join("");
 }
 
 // ===== イベント =====
@@ -253,81 +334,91 @@ fetch("data/shops_latest.json")
     renderMap();
   });
 
-fetch("diff.json")
-  .then(r => {
-    if (!r.ok) throw new Error("no diff");
-    return r.json();
-  })
-  .then(d => {
-    diffInfo = d;
+fetch("data/updates.json")
+  .then(r => r.json())
+  .then(history => {
+
+    const dates = Object.keys(history).sort().reverse();
+
+    if (!dates.length) return;
+
+    const latestDate = dates[0];
+    const d = history[latestDate];
 
     const notice  = document.getElementById("updateNotice");
     const summary = document.getElementById("updateSummary");
     const details = document.getElementById("updateDetails");
-    const toggle  = document.getElementById("updateToggle");
+    const historyBox = document.getElementById("updateHistory");
 
-    // --- 実質的な更新判定 ---
+    // ===== 更新判定 =====
     const hasRealUpdate =
       (d.added?.length ?? 0) > 0 ||
       (d.removed?.length ?? 0) > 0 ||
       (d.machine_changed?.length ?? 0) > 0;
 
     if (!hasRealUpdate) {
-      // ★ 更新なし → 完全に非表示
       notice.style.display = "none";
-      summary.textContent = "";
-      details.innerHTML = "";
+      hasUpdateUI = false;
       return;
     }
 
-    // --- 更新あり ---
     notice.style.display = "block";
+    hasUpdateUI = true;
 
+    // ===== 地図ハイライト用 =====
     addedIds   = new Set(d.added.map(s => s.id));
     changedIds = new Set(d.machine_changed.map(s => s.id));
 
-    // --- サマリー ---
+    // ===== サマリー =====
     const lines = [];
-    if (d.added.length) lines.push(`🟢 追加 ${d.added.length}件`);
-    if (d.removed.length) lines.push(`🔴 削除 ${d.removed.length}件`);
-    if (d.machine_changed.length) lines.push(`🟡 台数変更 ${d.machine_changed.length}件`);
+    if (d.added.length) lines.push(`🟢追加 ${d.added.length}`);
+    if (d.removed.length) lines.push(`🔴削除 ${d.removed.length}`);
+    if (d.machine_changed.length) lines.push(`🟡台数変更 ${d.machine_changed.length}`);
     summary.textContent = lines.join(" / ");
 
-    // --- 一覧 ---
-    const html = [];
+    // ===== 今日の詳細 =====
+    details.innerHTML = buildUpdateHTML(d);
 
-    if (d.added.length) {
-      html.push("<strong>🟢 追加店舗</strong><ul>");
-      d.added.forEach(s => {
-        html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
-      });
-      html.push("</ul>");
-    }
+    // ===== 履歴ボタン =====
+    historyBox.innerHTML = "<strong>📅 更新履歴</strong><br>";
 
-    if (d.removed.length) {
-      html.push("<strong>🔴 削除店舗</strong><ul>");
-      d.removed.forEach(s => {
-        html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
-      });
-      html.push("</ul>");
-    }
+    dates.slice(0,7).forEach(date => {
 
-    if (d.machine_changed.length) {
-      html.push("<strong>🟡 台数変更</strong><ul>");
-      d.machine_changed.forEach(s => {
-        html.push(`<li>【${s.pref ?? "不明"}】${s.name}：${s.before} → ${s.after}</li>`);
-      });
-      html.push("</ul>");
-    }
+      const btn = document.createElement("button");
+      btn.textContent = date;
+      btn.style.margin = "2px";
 
-    details.innerHTML = html.join("");
+      btn.onclick = () => {
+
+        const data = history[date];
+
+        // 地図ハイライト更新
+        addedIds   = new Set(data.added.map(s=>s.id));
+        changedIds = new Set(data.machine_changed.map(s=>s.id));
+        renderMap();
+
+        // モーダル表示
+        modalDetails.innerHTML =
+          `<h3>${date}の更新</h3>` +
+          buildUpdateHTML(data);
+
+        modal.style.display = "block";
+
+      };
+
+      historyBox.appendChild(btn);
+
+    });
 
     renderMap();
+
   })
   .catch(() => {
-    console.log("diff.json not found");
-    document.getElementById("updateNotice").style.display = "none";
-    renderMap();
+    console.log("updates.json not found");
+
+    const notice = document.getElementById("updateNotice");
+    if (notice) notice.style.display = "none";
+    hasUpdateUI = false;
   });
 
 const updateToggle = document.getElementById("updateToggle");
