@@ -150,19 +150,22 @@ def update_history(added, removed, machine_changed):
     }
 
     # 既存履歴読み込み
-    if os.path.exists(HISTORY):
-        with open(HISTORY, encoding="utf-8") as f:
-            history = json.load(f)
+    if os.path.exists(HISTORY) and os.path.getsize(HISTORY) > 0:
+        try:
+            with open(HISTORY, encoding="utf-8") as f:
+                history = json.load(f)
+        except json.JSONDecodeError:
+            history = {}
     else:
         history = {}
 
     # 今日の履歴追加
     history[today] = today_diff
 
-    # 新しい順に並べる
+    # 新しい順
     history = dict(sorted(history.items(), reverse=True))
 
-    # 7日分だけ残す
+    # 7日保持
     history = dict(list(history.items())[:7])
 
     with open(HISTORY, "w", encoding="utf-8") as f:
