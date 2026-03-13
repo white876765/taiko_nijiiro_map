@@ -14,7 +14,7 @@ const PREF_ORDER = [
 let originalShops = [];
 
 // ===== Map 初期化 =====
-const map = L.map("map", { zoomControl: false }).setView([36.5, 138], 5);
+const map = L.map("map", { zoomControl: false, maxZoom: 18 }).setView([36.5, 138], 5);
 
 L.control.zoom({ position: "bottomright" }).addTo(map);
 
@@ -23,122 +23,72 @@ const locateControl = L.control({ position: "bottomright" });
 
 locateControl.onAdd = function(map) {
   const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-
-  div.innerHTML = `
-    <a href="#" title="現在地" id="locateBtn" style="font-size:18px;">◎</a>
-  `;
-
+  div.innerHTML = `<a href="#" title="現在地" id="locateBtn" style="font-size:18px;">◎</a>`;
   div.onclick = function(e) {
     e.preventDefault();
-
-    map.locate({
-      setView: false,
-      enableHighAccuracy: true
-    });
+    map.locate({ setView: false, enableHighAccuracy: true });
   };
-
   return div;
 };
-
 locateControl.addTo(map);
 
 let currentMarker;
-
 map.on("locationfound", function(e) {
-
-  // 現在地へズーム
   map.setView(e.latlng, 16);
-
-  if (currentMarker) {
-    map.removeLayer(currentMarker);
-  }
-
-  currentMarker = L.circleMarker(e.latlng, {
-    radius: 8,
-    color: "#007bff",
-    fillColor: "#007bff",
-    fillOpacity: 0.8
-  }).addTo(map);
-
+  if (currentMarker) map.removeLayer(currentMarker);
+  currentMarker = L.circleMarker(e.latlng, { radius: 8, color: "#007bff", fillColor: "#007bff", fillOpacity: 0.8 }).addTo(map);
 });
-
 map.on("locationerror", function() {
   alert("位置情報を取得できませんでした");
 });
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: "&copy; OpenStreetMap contributors"
-}).addTo(map);
+// ===== タイル =====
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
 
-const cluster = L.markerClusterGroup({
-  disableClusteringAtZoom: 16
-});
+// ===== クラスタ =====
+const cluster = L.markerClusterGroup({ disableClusteringAtZoom: 16 });
 map.addLayer(cluster);
 
+// ===== アイコン =====
 const normalIcon = new L.Icon.Default();
+const addedIcon = L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/green-dot.png", iconSize:[24,24], iconAnchor:[12,24], popupAnchor:[0,-20] });
+const changedIcon = L.icon({ iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png", iconSize:[24,24], iconAnchor:[12,24], popupAnchor:[0,-20] });
 
-const addedIcon = L.icon({
-  iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/green-dot.png",
-  iconSize: [24, 24],
-  iconAnchor: [12, 24],
-  popupAnchor: [0, -20]
-});
-
-const changedIcon = L.icon({
-  iconUrl: "https://maps.gstatic.com/mapfiles/ms2/micons/orange-dot.png",
-  iconSize: [24, 24],
-  iconAnchor: [12, 24],
-  popupAnchor: [0, -20]
-});
-
+// ===== DOM参照 =====
 const searchBox = document.getElementById("searchBox");
 const prefFilter = document.getElementById("prefFilter");
 const stats = document.getElementById("stats");
 
 let addedIds = new Set();
 let changedIds = new Set();
+let hasUpdateHistory = false;
+let filterOpen = false;
+let historySelect = null;
 
-let hasUpdateUI = false;
-
-// ===== フィルタ系 =====
-function getSelectedFilters() {
-  return [...document.querySelectorAll(".machineFilter:checked")].map(c => c.value);
-}
+// ===== フィルタ =====
+function getSelectedFilters() { return [...document.querySelectorAll(".machineFilter:checked")].map(c=>c.value); }
 
 function matchMachineFilter(m, filters) {
   if (!filters.length) return true;
-
-  for (let i = 0; i < filters.length; i++) {
-    const f = filters[i];
-
+  for (const f of filters) {
     if (f === "10+" && m >= 10) return true;
-
     if (f.includes("-")) {
       const [min, max] = f.split("-").map(Number);
       if (m >= min && m <= max) return true;
-    } else if (Number(f) === m) {
-      return true;
-    }
+    } else if (Number(f) === m) return true;
   }
-
   return false;
 }
 
-// ===== 描画 =====
+// ===== マーカー描画 =====
 function renderMap() {
   cluster.clearLayers();
-
   const keyword = searchBox.value.toLowerCase();
   const pref = prefFilter.value;
   const filters = getSelectedFilters();
+  let count=0, total=0, bounds=[];
 
-  let count = 0;
-  let total = 0;
-  const bounds = [];
-
-  for (let i = 0; i < originalShops.length; i++) {
-    const shop = originalShops[i];
-
+  for (const shop of originalShops) {
     if (!shop.lat || !shop.lng) continue;
     if (pref !== "ALL" && shop.pref !== pref) continue;
     if (!matchMachineFilter(shop.machines, filters)) continue;
@@ -148,300 +98,167 @@ function renderMap() {
     if (addedIds.has(shop.id)) icon = addedIcon;
     else if (changedIds.has(shop.id)) icon = changedIcon;
 
-    const marker = L.marker([shop.lat, shop.lng], { icon })
-      .bindPopup(
-        `<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`
-      );
-
+    const marker = L.marker([shop.lat, shop.lng], { icon }).bindPopup(`<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`);
     cluster.addLayer(marker);
     bounds.push([shop.lat, shop.lng]);
-
     count++;
-    total += shop.machines || 0;
+    total += shop.machines||0;
   }
 
   stats.textContent = `表示店舗数: ${count} / 台数合計: ${total}`;
-
-  if (pref !== "ALL" && bounds.length) {
-    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
-  } else {
-    map.setView([36.5, 138], 5);
-  }
+  if (pref !== "ALL" && bounds.length) map.fitBounds(bounds, { padding: [30,30], maxZoom:15 });
+  else map.setView([36.5,138],5);
 }
 
-map.on("click", () => {
-  if (!isMobile()) return;
-
-  closeMobilePanels();
-});
-
-["controls", "updateNotice"].forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener("click", e => e.stopPropagation());
-});
-
-function disableMapInteraction() {
-  map.dragging.disable();
-  map.touchZoom.disable();
-  map.doubleClickZoom.disable();
-  map.scrollWheelZoom.disable();
-  map.boxZoom.disable();
-  map.keyboard.disable();
-}
-
-function enableMapInteraction() {
-  map.dragging.enable();
-  map.touchZoom.enable();
-  map.doubleClickZoom.enable();
-  map.scrollWheelZoom.enable();
-  map.boxZoom.enable();
-  map.keyboard.enable();
-}
+// ===== モバイルUI =====
+function isMobile() { return window.innerWidth < 768; }
 
 function closeMobilePanels() {
   if (!isMobile()) return;
-
   const controls = document.getElementById("controls");
   const updateDetails = document.getElementById("updateDetails");
-  const notice = document.getElementById("updateNotice");
-
   if (controls) controls.style.display = "none";
-
   if (updateDetails) {
     updateDetails.style.display = "none";
     const toggle = document.getElementById("updateToggle");
     if (toggle) toggle.textContent = "▶ 表示する";
   }
-
-  // ★ ここを追加
-  if (notice && hasUpdateUI) notice.style.display = "block";
-
+  if (historySelect) historySelect.value = "";
+  filterOpen = false;
+  updateNoticeVisibility();
   enableMapInteraction();
-}
-
-function isMobile() {
-  return window.innerWidth < 768;
 }
 
 function isAnyPanelOpen() {
   const controls = document.getElementById("controls");
   const updateDetails = document.getElementById("updateDetails");
-
-  return (
-    controls?.style.display === "block" ||
-    updateDetails?.style.display === "block"
-  );
+  return (controls?.style.display === "block" || updateDetails?.style.display === "block");
 }
 
-function updateMapInteractionState() {
-  if (!isMobile()) return;
+function disableMapInteraction() { map.dragging.disable(); map.touchZoom.disable(); map.doubleClickZoom.disable(); map.scrollWheelZoom.disable(); map.boxZoom.disable(); map.keyboard.disable(); }
+function enableMapInteraction() { map.dragging.enable(); map.touchZoom.enable(); map.doubleClickZoom.enable(); map.scrollWheelZoom.enable(); map.boxZoom.enable(); map.keyboard.enable(); }
+function updateMapInteractionState() { if (!isMobile()) return; isAnyPanelOpen() ? disableMapInteraction() : enableMapInteraction(); }
 
-  if (isAnyPanelOpen()) {
-    disableMapInteraction();
-  } else {
-    enableMapInteraction();
-  }
-}
-
-function buildUpdateHTML(d){
-
-  const html = [];
-
-  if (d.added?.length) {
-    html.push("<strong>🟢追加店舗</strong><ul>");
-    d.added.forEach(s=>{
-      html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
-    });
-    html.push("</ul>");
-  }
-
-  if (d.removed?.length) {
-    html.push("<strong>🔴削除店舗</strong><ul>");
-    d.removed.forEach(s=>{
-      html.push(`<li>【${s.pref ?? "不明"}】${s.name}</li>`);
-    });
-    html.push("</ul>");
-  }
-
-  if (d.machine_changed?.length) {
-    html.push("<strong>🟡台数変更</strong><ul>");
-    d.machine_changed.forEach(s=>{
-      html.push(`<li>【${s.pref ?? "不明"}】${s.name}：${s.before} → ${s.after}</li>`);
-    });
-    html.push("</ul>");
-  }
-
+// ===== 更新UI =====
+function buildUpdateHTML(d) {
+  const html=[];
+  if (d.added?.length) { html.push("<strong>🟢追加店舗</strong><ul>"+d.added.map(s=>`<li>【${s.pref??"不明"}】${s.name}</li>`).join("")+"</ul>"); }
+  if (d.removed?.length) { html.push("<strong>🔴削除店舗</strong><ul>"+d.removed.map(s=>`<li>【${s.pref??"不明"}】${s.name}</li>`).join("")+"</ul>"); }
+  if (d.machine_changed?.length) { html.push("<strong>🟡台数変更</strong><ul>"+d.machine_changed.map(s=>`<li>【${s.pref??"不明"}】${s.name}：${s.before} → ${s.after}</li>`).join("")+"</ul>"); }
   return html.join("");
 }
 
-// ===== イベント =====
-document.querySelectorAll(".machineFilter").forEach(cb =>
-  cb.addEventListener("change", renderMap)
-);
-document.getElementById("searchBox").addEventListener("input", renderMap);
-document.getElementById("prefFilter").addEventListener("change", renderMap);
-
-document.getElementById("selectAll").onclick = () => {
-  document.querySelectorAll(".machineFilter").forEach(c => c.checked = true);
-  renderMap();
-};
-document.getElementById("clearAll").onclick = () => {
-  document.querySelectorAll(".machineFilter").forEach(c => c.checked = false);
-  renderMap();
-};
-
-document.getElementById("toggleControls").onclick = e => {
-  e.stopPropagation();
-
-  const c = document.getElementById("controls");
+function updateNoticeVisibility() {
   const notice = document.getElementById("updateNotice");
-  const open = c.style.display === "block";
+  if(!notice) return;
+  if(!hasUpdateHistory || filterOpen) notice.style.display="none";
+  else notice.style.display="block";
+}
 
-  c.style.display = open ? "none" : "block";
+// ===== モーダル =====
+const modal=document.getElementById("updateModal");
+const modalDetails=document.getElementById("modalDetails");
 
-  // ★ フィルタ開いてる間は通知を隠す
-  if (!open) {
-    notice.style.display = "none";
+function showModal(title, htmlContent) { modalDetails.innerHTML=`<h3>${title}</h3>${htmlContent}`; modal.style.display="block"; }
+function closeUpdateModal() { modal.style.display="none"; if(historySelect) historySelect.value=""; }
+
+// ===== ハイライト =====
+function updateHighlight(update) { addedIds=new Set((update.added??[]).map(s=>s.id)); changedIds=new Set((update.machine_changed??[]).map(s=>s.id)); renderMap(); }
+
+// ===== JSON 読み込み =====
+fetch("data/shops_latest.json").then(r=>r.json()).then(data=>{
+  originalShops=data.shops;
+  originalShops.forEach(s=>{if(!s.pref && s.address) s.pref=s.address.split(" ")[0];});
+  const prefs=new Set(originalShops.map(s=>s.pref));
+  const select=document.getElementById("prefFilter");
+  PREF_ORDER.forEach(p=>{if(prefs.has(p)){ const o=document.createElement("option"); o.value=p; o.textContent=p; select.appendChild(o);}});
+  renderMap();
+});
+
+fetch("data/updates.json").then(r=>r.json()).then(history=>{
+  const dates=Object.keys(history).sort().reverse();
+  hasUpdateHistory = dates.length>0;
+  updateNoticeVisibility();
+
+  if(!dates.length) return;
+
+  const notice = document.getElementById("updateNotice");
+  const summary = document.getElementById("updateSummary");
+  const details = document.getElementById("updateDetails");
+  const toggle = document.getElementById("updateToggle");
+  const historyBox=document.getElementById("updateHistory");
+
+  const latestDate = dates[0];
+  const d = history[latestDate];
+
+  const hasRealUpdate=(d.added?.length>0)||(d.removed?.length>0)||(d.machine_changed?.length>0);
+
+  // ===== 本日の更新タイトル・サマリー =====
+  if (hasRealUpdate) {
+    // 本日の更新あり
+    notice.querySelector("strong").textContent = "📢 本日更新あり";
+    const lines = [];
+    if (d.added?.length) lines.push(`🟢追加 ${d.added.length}`);
+    if (d.removed?.length) lines.push(`🔴削除 ${d.removed.length}`);
+    if (d.machine_changed?.length) lines.push(`🟡台数変更 ${d.machine_changed.length}`);
+    summary.textContent = lines.join(" / ");
+    details.innerHTML = buildUpdateHTML(d);
+    toggle.style.display = "inline-block";
   } else {
-    notice.style.display = "block";
+    // 本日の更新なし
+    notice.querySelector("strong").textContent = "本日の更新なし";
+    summary.textContent = "";
+    details.innerHTML = "";
+    toggle.style.display = "none"; // 本日の更新ボタンは非表示
   }
 
+// ここで notice は常に表示
+notice.style.display = "block";
+
+  // 履歴プルダウン
+  historySelect=document.createElement("select");
+  historySelect.style.marginTop="4px";
+  const defaultOption=document.createElement("option"); defaultOption.value=""; defaultOption.textContent="日付を選択"; historySelect.appendChild(defaultOption);
+  dates.slice(1,8).forEach(date=>{ const opt=document.createElement("option"); opt.value=date; opt.textContent=date; historySelect.appendChild(opt); });
+  historySelect.onchange=function(){
+    const data=history[historySelect.value];
+    updateHighlight(data);
+    const html=buildUpdateHTML(data)||"更新なし";
+    showModal(`${historySelect.value}の更新`,html);
+  };
+  historyBox.innerHTML="<strong>📅 更新履歴</strong><br>";
+  historyBox.appendChild(historySelect);
+
+}).catch(()=>{ console.log("updates.json not found"); hasUpdateHistory=false; updateNoticeVisibility(); });
+
+// ===== イベント =====
+document.querySelectorAll(".machineFilter").forEach(cb=>cb.addEventListener("change",renderMap));
+searchBox.addEventListener("input",renderMap);
+prefFilter.addEventListener("change",renderMap);
+
+document.getElementById("selectAll").onclick=()=>{ document.querySelectorAll(".machineFilter").forEach(c=>c.checked=true); renderMap(); };
+document.getElementById("clearAll").onclick=()=>{ document.querySelectorAll(".machineFilter").forEach(c=>c.checked=false); renderMap(); };
+
+document.getElementById("toggleControls").onclick=e=>{
+  e.stopPropagation();
+  const c=document.getElementById("controls");
+  const open=c.style.display==="block";
+  c.style.display=open?"none":"block";
+  filterOpen=!open;
+  updateNoticeVisibility();
   updateMapInteractionState();
 };
 
-// ===== JSON 読み込み =====
-fetch("data/shops_latest.json")
-  .then(r => r.json())
-  .then(data => {
-    originalShops = data.shops;
-    originalShops.forEach(s => {
-      if (!s.pref && s.address) s.pref = s.address.split(" ")[0];
-    });
-
-    const prefs = new Set(originalShops.map(s => s.pref));
-    const select = document.getElementById("prefFilter");
-
-    PREF_ORDER.forEach(p => {
-      if (prefs.has(p)) {
-        const o = document.createElement("option");
-        o.value = p;
-        o.textContent = p;
-        select.appendChild(o);
-      }
-    });
-
-    renderMap();
-  });
-
-fetch("data/updates.json")
-  .then(r => r.json())
-  .then(history => {
-
-    const dates = Object.keys(history).sort().reverse();
-
-    if (!dates.length) return;
-
-    const latestDate = dates[0];
-    const d = history[latestDate];
-
-    const notice  = document.getElementById("updateNotice");
-    const summary = document.getElementById("updateSummary");
-    const details = document.getElementById("updateDetails");
-    const historyBox = document.getElementById("updateHistory");
-
-    // ===== 更新判定 =====
-    const hasRealUpdate =
-      (d.added?.length ?? 0) > 0 ||
-      (d.removed?.length ?? 0) > 0 ||
-      (d.machine_changed?.length ?? 0) > 0;
-
-    if (!hasRealUpdate) {
-      notice.style.display = "none";
-      hasUpdateUI = false;
-      return;
-    }
-
-    notice.style.display = "block";
-    hasUpdateUI = true;
-
-    // ===== 地図ハイライト用 =====
-    addedIds   = new Set(d.added.map(s => s.id));
-    changedIds = new Set(d.machine_changed.map(s => s.id));
-
-    // ===== サマリー =====
-    const lines = [];
-    if (d.added.length) lines.push(`🟢追加 ${d.added.length}`);
-    if (d.removed.length) lines.push(`🔴削除 ${d.removed.length}`);
-    if (d.machine_changed.length) lines.push(`🟡台数変更 ${d.machine_changed.length}`);
-    summary.textContent = lines.join(" / ");
-
-    // ===== 今日の詳細 =====
-    details.innerHTML = buildUpdateHTML(d);
-
-    // ===== 履歴ボタン =====
-    historyBox.innerHTML = "<strong>📅 更新履歴</strong><br>";
-
-    dates.slice(0,7).forEach(date => {
-
-      const btn = document.createElement("button");
-      btn.textContent = date;
-      btn.style.margin = "2px";
-
-      btn.onclick = () => {
-
-        const data = history[date];
-
-        // 地図ハイライト更新
-        addedIds   = new Set(data.added.map(s=>s.id));
-        changedIds = new Set(data.machine_changed.map(s=>s.id));
-        renderMap();
-
-        // モーダル表示
-        modalDetails.innerHTML =
-          `<h3>${date}の更新</h3>` +
-          buildUpdateHTML(data);
-
-        modal.style.display = "block";
-
-      };
-
-      historyBox.appendChild(btn);
-
-    });
-
-    renderMap();
-
-  })
-  .catch(() => {
-    console.log("updates.json not found");
-
-    const notice = document.getElementById("updateNotice");
-    if (notice) notice.style.display = "none";
-    hasUpdateUI = false;
-  });
-
-const updateToggle = document.getElementById("updateToggle");
-const updateDetails = document.getElementById("updateDetails");
-const modal = document.getElementById("updateModal");
-const modalDetails = document.getElementById("modalDetails");
-const closeModal = document.getElementById("closeModal");
+const updateToggle=document.getElementById("updateToggle");
+const closeModal=document.getElementById("closeModal");
 
 // 「表示する」クリック
-updateToggle.addEventListener("click", (e) => {
-  e.stopPropagation();
-  modalDetails.innerHTML = updateDetails.innerHTML;
-  modal.style.display = "block";
-});
+updateToggle?.addEventListener("click",e=>{ e.stopPropagation(); showModal("本日の更新", document.getElementById("updateDetails").innerHTML); });
 
-// 背景クリックで閉じる
-modal.addEventListener("click", (e) => {
-  if (e.target === modal) {
-    modal.style.display = "none";
-  }
-});
+// モーダル閉じる
+modal?.addEventListener("click", e=>{ if(e.target===modal) closeUpdateModal(); });
+closeModal?.addEventListener("click", ()=>closeUpdateModal());
 
-// ×ボタンで閉じる
-closeModal.addEventListener("click", () => {
-  modal.style.display = "none";
-});
+// 地図タップでパネル閉じ
+map.on("click",()=>{ if(isMobile()) closeMobilePanels(); });
+["controls","updateNotice"].forEach(id=>document.getElementById(id)?.addEventListener("click", e=>e.stopPropagation()));
