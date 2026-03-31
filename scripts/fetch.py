@@ -7,7 +7,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from urllib.parse import urlparse, parse_qs
 from html import unescape
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 import time
 import json
 import re
@@ -126,8 +126,10 @@ def write_summary(added, removed, machine_changed):
     print(summary_text)
 
 def write_diff_json(added, removed, machine_changed):
+    JST = timezone(timedelta(hours=9))
+    today_jst = datetime.now(JST).date().isoformat()
     diff = {
-        "date": date.today().isoformat(),
+        "date": today_jst,
         "has_update": bool(added or removed or machine_changed),
         "added": added,
         "removed": removed,
@@ -141,7 +143,8 @@ def write_diff_json(added, removed, machine_changed):
 def update_history(added, removed, machine_changed):
     HISTORY = os.path.join(DATA_DIR, "updates.json")
 
-    today = date.today().isoformat()
+    JST = timezone(timedelta(hours=9))
+    today = datetime.now(JST).date().isoformat()
 
     today_diff = {
         "added": added,
