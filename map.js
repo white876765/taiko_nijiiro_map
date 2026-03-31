@@ -221,10 +221,19 @@ notice.style.display = "block";
   const defaultOption=document.createElement("option"); defaultOption.value=""; defaultOption.textContent="日付を選択"; historySelect.appendChild(defaultOption);
   dates.slice(1,8).forEach(date=>{ const opt=document.createElement("option"); opt.value=date; opt.textContent=date; historySelect.appendChild(opt); });
   historySelect.onchange=function(){
-    const data=history[historySelect.value];
-    updateHighlight(data);
+    const selectedDate = historySelect.value;
+    const data=history[selectedDate];
     const html=buildUpdateHTML(data)||"更新なし";
-    showModal(`${historySelect.value}の更新`,html);
+    showModal(`${selectedDate}の更新`,html);
+    
+    // 本日の日付の場合はマーカーをハイライト、過去の日付の場合はクリア
+    if (selectedDate === latestDate) {
+      updateHighlight(data);
+    } else {
+      addedIds = new Set();
+      changedIds = new Set();
+      renderMap();
+    }
   };
   historyBox.innerHTML="<strong>📅 更新履歴</strong><br>";
   historyBox.appendChild(historySelect);
