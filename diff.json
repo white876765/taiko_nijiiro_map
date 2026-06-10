@@ -1,31 +1,20 @@
 {
-  "date": "2026-06-10",
+  "date": "2026-06-11",
   "has_update": true,
-  "added": [
-    {
-      "id": "山形県|人類遊び研究所・山形H棟|None|None",
-      "name": "人類遊び研究所・山形H棟",
-      "address": "山形県 長井市 時庭 1960",
-      "pref": "山形県",
-      "machines": 1,
-      "lat": null,
-      "lng": null,
-      "area": "JP-06"
-    }
-  ],
+  "added": [],
   "removed": [],
   "machine_changed": [
     {
-      "id": "神奈川県|HapipiLandこどもの国|35.555202|139.485378",
-      "name": "HapipiLandこどもの国",
-      "pref": "神奈川県",
-      "before": 3,
+      "id": "宮崎県|モーリーファンタジー日向|32.423931|131.652688",
+      "name": "モーリーファンタジー日向",
+      "pref": "宮崎県",
+      "before": 2,
       "after": 1
     },
     {
-      "id": "長野県|HapipiLand豊科|36.300996|137.908064",
-      "name": "HapipiLand豊科",
-      "pref": "長野県",
+      "id": "沖縄県|モーリーファンタジーライカム|26.314286|127.796464",
+      "name": "モーリーファンタジーライカム",
+      "pref": "沖縄県",
       "before": 2,
       "after": 1
     }
