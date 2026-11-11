@@ -1,4 +1,9 @@
 {
+  "2026-11-12": {
+    "added": [],
+    "removed": [],
+    "machine_changed": []
+  },
   "2026-11-11": {
     "added": [],
     "removed": [],
@@ -25348,11 +25353,6 @@
         "area": "JP-47"
       }
     ],
-    "machine_changed": []
-  },
-  "2026-11-05": {
-    "added": [],
-    "removed": [],
     "machine_changed": []
   }
 }
