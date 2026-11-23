@@ -21,17 +21,31 @@ function app() {
   const elements = new Map();
   function element(id = '') {
     return { id, style: {}, value: id === 'prefFilter' ? 'ALL' : '', textContent: '', innerHTML: '',
-      children: [], appendChild(child) { this.children.push(child); }, addEventListener() {} };
+      listeners: {}, children: [], appendChild(child) { this.children.push(child); },
+      addEventListener(type, callback) { this.listeners[type] = callback; } };
   }
+  const checkboxes = ['1', '2', '3', '4', '5', '6-7', '8-9', '10+'].map(value => ({
+    ...element(), value, checked: false
+  }));
   const document = {
     getElementById(id) {
       if (!htmlIds.has(id)) return null;
       if (!elements.has(id)) elements.set(id, element(id));
       return elements.get(id);
     },
-    createElement() { return element(); }, querySelectorAll() { return []; }
+    createElement() { return element(); },
+    querySelectorAll(selector) {
+      if (selector === '.machineFilter') return checkboxes;
+      if (selector === '.machineFilter:checked') return checkboxes.filter(box => box.checked);
+      return [];
+    }
   };
-  const map = { setView() { return this; }, addLayer() {}, on() {}, fitBounds() {} };
+  const viewChanges = [];
+  const map = {
+    setView(center, zoom) { viewChanges.push({ type: 'setView', center, zoom }); return this; },
+    addLayer() {}, on() {},
+    fitBounds(bounds, options) { viewChanges.push({ type: 'fitBounds', bounds, options }); }
+  };
   const cluster = { layers: [], clearLayers() { this.layers = []; }, addLayer(layer) { this.layers.push(layer); } };
   const control = () => ({ addTo() { return this; } });
   control.zoom = control;
@@ -47,7 +61,7 @@ function app() {
       marker: (coordinates, options) => ({ coordinates, icon: options.icon, bindPopup() { return this; } }) }
   });
   vm.runInContext(source, context);
-  return { elements, cluster, context,
+  return { elements, cluster, context, map, viewChanges, checkboxes,
     respond(url, value, status = 200) { pending[url]({ ok: status === 200, status, json: async () => value }); },
     ready: () => vm.runInContext('dataReady', context) };
 }
@@ -122,4 +136,61 @@ test('shop HTTP failure is visible instead of showing a successful update', asyn
   assert.match(view.elements.get('stats').textContent, /読み込めません/);
   assert.match(view.elements.get('fetchStatus').textContent, /失敗/);
   assert.equal(view.cluster.layers.length, 0);
+});
+
+async function loadedApp() {
+  const view = app();
+  view.respond('data/shops_latest.json', { shops });
+  view.respond('data/updates.json', history);
+  await view.ready();
+  view.map.setView([35.5, 139.5], 16); // Simulate a panned/zoomed or located view.
+  view.viewChanges.length = 0;
+  return view;
+}
+
+test('name and machine filters update results without changing the view', async () => {
+  const view = await loadedApp();
+  const search = view.elements.get('searchBox');
+  search.value = 'added';
+  search.listeners.input({ type: 'input' });
+  assert.equal(view.cluster.layers.length, 1);
+  view.checkboxes[0].checked = true; // No shop has only one machine.
+  view.checkboxes[0].listeners.change({ type: 'change' });
+  assert.equal(view.cluster.layers.length, 0);
+  view.elements.get('selectAll').onclick();
+  assert.equal(view.cluster.layers.length, 1);
+  view.elements.get('clearAll').onclick();
+  assert.equal(view.cluster.layers.length, 1);
+  search.value = '';
+  search.listeners.input({ type: 'input' });
+  assert.equal(view.cluster.layers.length, 3);
+  assert.equal(view.viewChanges.length, 0);
+});
+
+test('prefecture changes fit the region even when other filters match no shops', async () => {
+  const view = await loadedApp();
+  view.elements.get('searchBox').value = 'no matching name';
+  const prefecture = view.elements.get('prefFilter');
+  prefecture.value = '東京都';
+  prefecture.listeners.change();
+  assert.equal(view.cluster.layers.length, 0);
+  assert.equal(view.viewChanges.length, 1);
+  assert.equal(view.viewChanges[0].type, 'fitBounds');
+  assert.equal(view.viewChanges[0].bounds.length, 3);
+  view.viewChanges.length = 0;
+  prefecture.value = 'ALL';
+  prefecture.listeners.change();
+  assert.equal(view.viewChanges[0].type, 'setView');
+  assert.equal(view.viewChanges[0].zoom, 5);
+});
+
+test('initial data rendering preserves a view changed while data was loading', async () => {
+  const view = app();
+  view.map.setView([35.5, 139.5], 16);
+  view.viewChanges.length = 0;
+  view.respond('data/shops_latest.json', { shops });
+  view.respond('data/updates.json', history);
+  await view.ready();
+  assert.equal(view.cluster.layers.length, 3);
+  assert.equal(view.viewChanges.length, 0);
 });

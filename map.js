@@ -78,7 +78,7 @@ function matchMachineFilter(m, filters) {
 }
 
 // ===== マーカー描画 =====
-function renderMap() {
+function renderMap({ fitView = false } = {}) {
   cluster.clearLayers();
   const keyword = searchBox.value.toLowerCase();
   const pref = prefFilter.value;
@@ -88,19 +88,21 @@ function renderMap() {
   for (const shop of originalShops) {
     if (!shop.lat || !shop.lng) continue;
     if (pref !== "ALL" && shop.pref !== pref) continue;
+    bounds.push([shop.lat, shop.lng]);
     if (!matchMachineFilter(shop.machines, filters)) continue;
     if (keyword && !shop.name.toLowerCase().includes(keyword)) continue;
 
     const marker = L.marker([shop.lat, shop.lng], { icon: normalIcon }).bindPopup(`<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`);
     cluster.addLayer(marker);
-    bounds.push([shop.lat, shop.lng]);
     count++;
     total += shop.machines||0;
   }
 
   stats.textContent = `表示店舗数: ${count} / 台数合計: ${total}`;
-  if (pref !== "ALL" && bounds.length) map.fitBounds(bounds, { padding: [30,30], maxZoom:15 });
-  else map.setView([36.5,138],5);
+  if (fitView) {
+    if (pref === "ALL") map.setView([36.5,138],5);
+    else if (bounds.length) map.fitBounds(bounds, { padding: [30,30], maxZoom:15 });
+  }
 }
 
 // ===== モバイルUI =====
@@ -266,7 +268,7 @@ const dataReady = loadData();
 // ===== イベント =====
 document.querySelectorAll(".machineFilter").forEach(cb=>cb.addEventListener("change",renderMap));
 searchBox.addEventListener("input",renderMap);
-prefFilter.addEventListener("change",renderMap);
+prefFilter.addEventListener("change",()=>renderMap({ fitView: true }));
 
 document.getElementById("selectAll").onclick=()=>{ document.querySelectorAll(".machineFilter").forEach(c=>c.checked=true); renderMap(); };
 document.getElementById("clearAll").onclick=()=>{ document.querySelectorAll(".machineFilter").forEach(c=>c.checked=false); renderMap(); };
