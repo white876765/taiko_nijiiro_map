@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import Mock, patch
 
 import requests
@@ -160,6 +161,18 @@ class FetchTests(unittest.TestCase):
             self.assertEqual(fetch.load_shops(latest), baseline)
             self.assertEqual(fetch.load_shops(previous), baseline)
             self.assertFalse(json.loads((root / "diff.json").read_text(encoding="utf-8"))["has_update"])
+            metadata = json.loads(latest.read_text(encoding="utf-8"))
+            self.assertEqual(datetime.fromisoformat(metadata["fetched_at"]).utcoffset().total_seconds(), 9 * 3600)
+
+    def test_last_change_date_survives_history_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory)
+            latest = data / "shops_latest.json"
+            latest.write_text(json.dumps({"shops": sample_shops(), "last_changed_date": "2026-10-01"}), encoding="utf-8")
+            (data / "updates.json").write_text('{"2026-11-23": {"added": []}}', encoding="utf-8")
+            with patch.multiple(fetch, DATA_DIR=data, LATEST=latest):
+                self.assertEqual(fetch.last_changed_date("2026-11-23T12:00:00+09:00", False), "2026-10-01")
+                self.assertEqual(fetch.last_changed_date("2026-11-23T12:00:00+09:00", True), "2026-11-23")
 
 
 if __name__ == "__main__":

@@ -212,6 +212,22 @@ def update_history(added, removed, machine_changed):
 def make_shop_id(shop):
     return f"{shop['pref']}|{shop['name']}|{shop['lat']}|{shop['lng']}"
 
+
+def last_changed_date(fetched_at, has_changes):
+    if has_changes:
+        return fetched_at[:10]
+    if LATEST.exists():
+        previous = json.loads(LATEST.read_text(encoding="utf-8"))
+        if previous.get("shops") and previous.get("last_changed_date"):
+            return previous["last_changed_date"]
+    history_path = DATA_DIR / "updates.json"
+    if history_path.exists():
+        history = json.loads(history_path.read_text(encoding="utf-8"))
+        return next((day for day in sorted(history, reverse=True)
+                     if any(history[day].get(key) for key in
+                            ("added", "removed", "machine_changed"))), None)
+    return None
+
 def fetch_list(session, area):
     url = f"{BASE}/list?area={area}"
     soup = get_page(session, url)
@@ -327,8 +343,10 @@ def main():
         raise RuntimeError("店舗IDが重複しているため更新を中止します")
     added, removed, machine_changed = diff_shops(baseline, shops)
     # 取得・検証に成功するまでは既存ファイルに触らない。
+    fetched_at = datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
+    changed_date = last_changed_date(fetched_at, bool(added or removed or machine_changed))
     write_json(PREV, {"shops": baseline})
-    write_json(LATEST, {"shops": shops})
+    write_json(LATEST, {"fetched_at": fetched_at, "last_changed_date": changed_date, "shops": shops})
     write_summary(added, removed, machine_changed)
     write_diff_json(added, removed, machine_changed)
     update_history(added, removed, machine_changed)

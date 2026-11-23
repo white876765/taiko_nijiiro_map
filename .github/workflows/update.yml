@@ -24,8 +24,15 @@ jobs:
         run: |
           pip install requests beautifulsoup4
 
-      - name: Test fetch safeguards
-        run: python -m unittest discover -s tests -v
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test fetch safeguards and map updates
+        run: |
+          python -m unittest discover -s tests -v
+          node --test tests/test_map.cjs
 
       - name: Fetch shop data
         run: |

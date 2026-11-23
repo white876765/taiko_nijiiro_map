@@ -61,9 +61,10 @@ const stats = document.getElementById("stats");
 
 let addedIds = new Set();
 let changedIds = new Set();
-let hasUpdateHistory = false;
+let hasUpdateInfo = false;
 let filterOpen = false;
 let historySelect = null;
+let highlightedDate = null;
 
 // ===== フィルタ =====
 function getSelectedFilters() { return [...document.querySelectorAll(".machineFilter:checked")].map(c=>c.value); }
@@ -121,7 +122,7 @@ function closeMobilePanels() {
   if (updateDetails) {
     updateDetails.style.display = "none";
     const toggle = document.getElementById("updateToggle");
-    if (toggle) toggle.textContent = "▶ 表示する";
+    if (toggle) toggle.textContent = "▶ 変更内容を表示";
   }
   if (historySelect) historySelect.value = "";
   filterOpen = false;
@@ -151,7 +152,7 @@ function buildUpdateHTML(d) {
 function updateNoticeVisibility() {
   const notice = document.getElementById("updateNotice");
   if(!notice) return;
-  if(!hasUpdateHistory || filterOpen) notice.style.display="none";
+  if(!hasUpdateInfo || filterOpen) notice.style.display="none";
   else notice.style.display="block";
 }
 
@@ -162,83 +163,116 @@ const modalDetails=document.getElementById("modalDetails");
 function showModal(title, htmlContent) { modalDetails.innerHTML=`<h3>${title}</h3>${htmlContent}`; modal.style.display="block"; }
 function closeUpdateModal() { modal.style.display="none"; if(historySelect) historySelect.value=""; }
 
-// ===== ハイライト =====
-function updateHighlight(update) { addedIds=new Set((update.added??[]).map(s=>s.id)); changedIds=new Set((update.machine_changed??[]).map(s=>s.id)); renderMap(); }
+// ===== 取得日時・変更履歴 =====
+function jstDate(date) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(date);
+}
 
-// ===== JSON 読み込み =====
-fetch("data/shops_latest.json").then(r=>r.json()).then(data=>{
-  originalShops=data.shops;
-  originalShops.forEach(s=>{if(!s.pref && s.address) s.pref=s.address.split(" ")[0];});
-  const prefs=new Set(originalShops.map(s=>s.pref));
-  const select=document.getElementById("prefFilter");
-  PREF_ORDER.forEach(p=>{if(prefs.has(p)){ const o=document.createElement("option"); o.value=p; o.textContent=p; select.appendChild(o);}});
-  renderMap();
-});
+function hasChanges(update) {
+  return Boolean(update?.added?.length || update?.removed?.length || update?.machine_changed?.length);
+}
 
-fetch("data/updates.json").then(r=>r.json()).then(history=>{
-  const dates=Object.keys(history).sort().reverse();
-  hasUpdateHistory = dates.length>0;
-  updateNoticeVisibility();
+function renderUpdateInfo(history, fetchedAt, lastChangedDate, now = new Date()) {
+  hasUpdateInfo = true;
+  const fetched = fetchedAt ? new Date(fetchedAt) : null;
+  const validFetched = fetched && !Number.isNaN(fetched.getTime());
+  document.getElementById("lastFetched").textContent = validFetched
+    ? "最終取得日時：" + new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).format(fetched) + "（日本時間）"
+    : "最終取得日時：未記録（次回の正常取得から記録）";
+  document.getElementById("fetchStatus").textContent = validFetched && jstDate(fetched) !== jstDate(now)
+    ? "本日はまだ取得されていません" : "";
 
-  if(!dates.length) return;
-
-  const notice = document.getElementById("updateNotice");
+  const dates = Object.keys(history ?? {}).sort().reverse();
+  highlightedDate = dates.find(date => hasChanges(history[date])) ?? null;
+  const changedDate = lastChangedDate || highlightedDate;
+  document.getElementById("lastChanged").textContent = changedDate
+    ? `最終変更日：${changedDate}`
+    : history === null ? "変更履歴を読み込めませんでした"
+    : "最終変更日：不明（保存中の履歴に変更なし）";
   const summary = document.getElementById("updateSummary");
   const details = document.getElementById("updateDetails");
   const toggle = document.getElementById("updateToggle");
-  const historyBox=document.getElementById("updateHistory");
+  const legend = document.getElementById("markerLegend");
+  const update = highlightedDate ? history[highlightedDate] : {};
+  addedIds = new Set((update.added ?? []).map(shop => shop.id));
+  changedIds = new Set((update.machine_changed ?? []).map(shop => shop.id));
+  summary.textContent = highlightedDate
+    ? `追加 ${update.added?.length ?? 0} / 削除 ${update.removed?.length ?? 0} / 台数変更 ${update.machine_changed?.length ?? 0}`
+    : "";
+  details.innerHTML = buildUpdateHTML(update);
+  toggle.style.display = highlightedDate ? "inline-block" : "none";
+  toggle.textContent = "▶ 変更内容を表示";
+  legend.textContent = addedIds.size || changedIds.size
+    ? `マーカー：${highlightedDate}の変更（緑：追加／オレンジ：台数変更）` : "";
 
-  const latestDate = dates[0];
-  const d = history[latestDate];
-
-  const hasRealUpdate=(d.added?.length>0)||(d.removed?.length>0)||(d.machine_changed?.length>0);
-
-  // ===== 本日の更新タイトル・サマリー =====
-  if (hasRealUpdate) {
-    // 本日の更新あり
-    notice.querySelector("strong").textContent = "📢 本日更新あり";
-    const lines = [];
-    if (d.added?.length) lines.push(`🟢追加 ${d.added.length}`);
-    if (d.removed?.length) lines.push(`🔴削除 ${d.removed.length}`);
-    if (d.machine_changed?.length) lines.push(`🟡台数変更 ${d.machine_changed.length}`);
-    summary.textContent = lines.join(" / ");
-    details.innerHTML = buildUpdateHTML(d);
-    toggle.style.display = "inline-block";
-  } else {
-    // 本日の更新なし
-    notice.querySelector("strong").textContent = "本日の更新なし";
-    summary.textContent = "";
-    details.innerHTML = "";
-    toggle.style.display = "none"; // 本日の更新ボタンは非表示
+  const historyBox = document.getElementById("updateHistory");
+  historyBox.innerHTML = dates.length ? "<strong>📅 更新履歴</strong><br>" : "";
+  historySelect = null;
+  if (dates.length) {
+    historySelect = document.createElement("select");
+    historySelect.style.marginTop = "4px";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "日付を選択";
+    historySelect.appendChild(placeholder);
+    dates.forEach(date => {
+      const option = document.createElement("option");
+      option.value = date;
+      option.textContent = date;
+      historySelect.appendChild(option);
+    });
+    historySelect.onchange = () => {
+      const selectedDate = historySelect.value;
+      if (!selectedDate || !history[selectedDate]) return;
+      showModal(`${selectedDate}の変更`, buildUpdateHTML(history[selectedDate]) || "変更なし");
+    };
+    historyBox.appendChild(historySelect);
   }
+  updateNoticeVisibility();
+}
 
-// ここで notice は常に表示
-notice.style.display = "block";
+// ===== JSON 読み込み =====
+async function loadJSON(url) {
+  const response = await fetch(url, { cache: "no-cache" });
+  if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+  return response.json();
+}
 
-  // 履歴プルダウン
-  historySelect=document.createElement("select");
-  historySelect.style.marginTop="4px";
-  const defaultOption=document.createElement("option"); defaultOption.value=""; defaultOption.textContent="日付を選択"; historySelect.appendChild(defaultOption);
-  dates.slice(1,8).forEach(date=>{ const opt=document.createElement("option"); opt.value=date; opt.textContent=date; historySelect.appendChild(opt); });
-  historySelect.onchange=function(){
-    const selectedDate = historySelect.value;
-    const data=history[selectedDate];
-    const html=buildUpdateHTML(data)||"更新なし";
-    showModal(`${selectedDate}の更新`,html);
-    
-    // 本日の日付の場合はマーカーをハイライト、過去の日付の場合はクリア
-    if (selectedDate === latestDate) {
-      updateHighlight(data);
-    } else {
-      addedIds = new Set();
-      changedIds = new Set();
-      renderMap();
+async function loadData() {
+  // 読み込み順にかかわらず、店舗と差分の両方がそろってから初回描画する。
+  const [shopsResult, historyResult] = await Promise.allSettled([
+    loadJSON("data/shops_latest.json"), loadJSON("data/updates.json")
+  ]);
+  const data = shopsResult.status === "fulfilled" ? shopsResult.value : null;
+  const history = historyResult.status === "fulfilled" ? historyResult.value : null;
+  renderUpdateInfo(history, data?.fetched_at, data?.last_changed_date);
+  if (!data || !Array.isArray(data.shops)) {
+    stats.textContent = "店舗データを読み込めませんでした";
+    document.getElementById("fetchStatus").textContent = "店舗データの読み込みに失敗しました。再読み込みしてください。";
+    return;
+  }
+  originalShops = data.shops;
+  originalShops.forEach(shop => {
+    if (!shop.pref && shop.address) shop.pref = shop.address.split(" ")[0];
+  });
+  const prefs = new Set(originalShops.map(shop => shop.pref));
+  PREF_ORDER.forEach(pref => {
+    if (prefs.has(pref)) {
+      const option = document.createElement("option");
+      option.value = pref;
+      option.textContent = pref;
+      prefFilter.appendChild(option);
     }
-  };
-  historyBox.innerHTML="<strong>📅 更新履歴</strong><br>";
-  historyBox.appendChild(historySelect);
+  });
+  renderMap();
+}
 
-}).catch(()=>{ console.log("updates.json not found"); hasUpdateHistory=false; updateNoticeVisibility(); });
+const dataReady = loadData();
 
 // ===== イベント =====
 document.querySelectorAll(".machineFilter").forEach(cb=>cb.addEventListener("change",renderMap));
@@ -262,7 +296,7 @@ const updateToggle=document.getElementById("updateToggle");
 const closeModal=document.getElementById("closeModal");
 
 // 「表示する」クリック
-updateToggle?.addEventListener("click",e=>{ e.stopPropagation(); showModal("本日の更新", document.getElementById("updateDetails").innerHTML); });
+updateToggle?.addEventListener("click",e=>{ e.stopPropagation(); showModal(`${highlightedDate}の変更`, document.getElementById("updateDetails").innerHTML); });
 
 // モーダル閉じる
 modal?.addEventListener("click", e=>{ if(e.target===modal) closeUpdateModal(); });
