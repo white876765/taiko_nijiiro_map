@@ -3,8 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'map.js'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const htmlIds = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
 const shops = ['added', 'changed', 'normal'].map(id => ({
   id, name: id, pref: '東京都', address: '東京都 千代田区', machines: 2, lat: 35, lng: 139
 }));
@@ -21,7 +24,11 @@ function app() {
       children: [], appendChild(child) { this.children.push(child); }, addEventListener() {} };
   }
   const document = {
-    getElementById(id) { if (!elements.has(id)) elements.set(id, element(id)); return elements.get(id); },
+    getElementById(id) {
+      if (!htmlIds.has(id)) return null;
+      if (!elements.has(id)) elements.set(id, element(id));
+      return elements.get(id);
+    },
     createElement() { return element(); }, querySelectorAll() { return []; }
   };
   const map = { setView() { return this; }, addLayer() {}, on() {}, fitBounds() {} };
@@ -44,6 +51,11 @@ function app() {
     respond(url, value, status = 200) { pending[url]({ ok: status === 200, status, json: async () => value }); },
     ready: () => vm.runInContext('dataReady', context) };
 }
+
+test('HTML requests the matching script revision instead of a cached older script', () => {
+  const revision = crypto.createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex').slice(0, 12);
+  assert.ok(html.includes(`src="map.js?v=${revision}"`));
+});
 
 for (const first of ['shops', 'history']) {
   test(`all markers stay default blue when ${first} loads first`, async () => {
