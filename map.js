@@ -114,7 +114,7 @@ function closeMobilePanels() {
   if (updateDetails) {
     updateDetails.style.display = "none";
     const toggle = document.getElementById("updateToggle");
-    if (toggle) toggle.textContent = "変更内容を見る";
+    if (toggle) toggle.textContent = "▶ 変更内容を表示";
   }
   if (historySelect) historySelect.value = "";
   filterOpen = false;
@@ -171,11 +171,11 @@ function renderUpdateInfo(history, fetchedAt, lastChangedDate, now = new Date())
   const fetched = fetchedAt ? new Date(fetchedAt) : null;
   const validFetched = fetched && !Number.isNaN(fetched.getTime());
   document.getElementById("lastFetched").textContent = validFetched
-    ? new Intl.DateTimeFormat("ja-JP", {
+    ? "最終取得日時：" + new Intl.DateTimeFormat("ja-JP", {
         timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit", hourCycle: "h23"
-      }).format(fetched) + " JST"
-    : "未記録（次回取得から表示）";
+      }).format(fetched) + "（日本時間）"
+    : "最終取得日時：未記録（次回取得から表示）";
   document.getElementById("fetchStatus").textContent = validFetched && jstDate(fetched) !== jstDate(now)
     ? "本日はまだ取得されていません" : "";
 
@@ -183,22 +183,21 @@ function renderUpdateInfo(history, fetchedAt, lastChangedDate, now = new Date())
   latestChangeDate = dates.find(date => hasChanges(history[date])) ?? null;
   const changedDate = lastChangedDate || latestChangeDate;
   document.getElementById("lastChanged").textContent = changedDate
-    ? changedDate
+    ? `最終変更日：${changedDate}`
     : history === null ? "変更履歴を読み込めませんでした"
-    : "履歴内に変更なし";
+    : "最終変更日：履歴内に変更なし";
   const summary = document.getElementById("updateSummary");
   const details = document.getElementById("updateDetails");
   const toggle = document.getElementById("updateToggle");
   const update = latestChangeDate ? history[latestChangeDate] : {};
-  document.getElementById("summaryDate").textContent = latestChangeDate ? `${latestChangeDate}の変更` : "";
-  summary.innerHTML = latestChangeDate ? [
-    ["added", "追加", update.added?.length ?? 0],
-    ["removed", "削除", update.removed?.length ?? 0],
-    ["changed", "台数変更", update.machine_changed?.length ?? 0]
-  ].map(([kind, label, count]) => `<div class="update-count ${kind}">${label}<b>${count}</b></div>`).join("") : "";
+  summary.textContent = latestChangeDate ? [
+    `🟢追加 ${update.added?.length ?? 0}`,
+    `🔴削除 ${update.removed?.length ?? 0}`,
+    `🟡台数変更 ${update.machine_changed?.length ?? 0}`
+  ].join(" / ") : "";
   details.innerHTML = buildUpdateHTML(update);
   toggle.style.display = latestChangeDate ? "inline-block" : "none";
-  toggle.textContent = "変更内容を見る";
+  toggle.textContent = "▶ 変更内容を表示";
 
   const historyBox = document.getElementById("updateHistory");
   historyBox.innerHTML = dates.length ? "<strong>📅 更新履歴</strong><br>" : "";
