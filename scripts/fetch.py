@@ -1,39 +1,76 @@
 import requests
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 from html import unescape
-from datetime import date, datetime, timezone, timedelta
-import time
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+import math
+import subprocess
+import tempfile
 import json
 import re
 import os
-import shutil
 
 BASE = "https://essential-truth-92204.appspot.com/S12"
 
-options = Options()
-options.add_argument("--headless=new")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-service = Service(ChromeDriverManager().install())
-driver = webdriver.Chrome(options=options)
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = ROOT / "data"
+LATEST = DATA_DIR / "shops_latest.json"
+PREV = DATA_DIR / "shops_prev.json"
+USER_AGENT = "TaikoMapUpdater/1.0 (+https://github.com/white876765/taiko_nijiiro_map)"
+MAX_DROP_RATIO = 0.20
 
-shops = []
 
-DATA_DIR = "data"
-LATEST = os.path.join(DATA_DIR, "shops_latest.json")
-PREV = os.path.join(DATA_DIR, "shops_prev.json")
+def create_session():
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT})
+    return session
 
-os.makedirs(DATA_DIR, exist_ok=True)
 
-# 前回分を退避
-if os.path.exists(LATEST):
-    shutil.copy(LATEST, PREV)
+def get_page(session, url):
+    response = session.get(url, timeout=30)
+    print(f"HTTP {response.status_code}: {url} ({len(response.content)} bytes)", flush=True)
+    response.raise_for_status()
+    return BeautifulSoup(response.content, "html.parser")
+
+
+def find_baseline():
+    # 空データが既に公開されていても、最後の正常なスナップショットと比較する。
+    for path in (LATEST, PREV):
+        shops = load_shops(path)
+        if shops:
+            print(f"比較元: {path} ({len(shops)} 店舗)", flush=True)
+            return shops
+    result = subprocess.run(
+        ["git", "log", "--format=%H", "--", "data/shops_latest.json"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    for revision in result.stdout.splitlines():
+        snapshot = subprocess.run(
+            ["git", "show", f"{revision}:data/shops_latest.json"],
+            cwd=ROOT, capture_output=True, check=True,
+        )
+        shops = json.loads(snapshot.stdout)["shops"]
+        if shops:
+            print(f"比較元: Git {revision} ({len(shops)} 店舗)", flush=True)
+            return shops
+    raise RuntimeError("正常な比較元データがありません。Git履歴またはバックアップを確認してください")
+
+
+def write_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         suffix=".tmp", delete=False) as f:
+            temporary = f.name
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
 
 def extract_pref(address):
     if not address:
@@ -120,7 +157,7 @@ def write_summary(added, removed, machine_changed):
 
     summary_text = "\n".join(lines)
 
-    with open("diff_summary.md", "w", encoding="utf-8") as f:
+    with open(ROOT / "diff_summary.md", "w", encoding="utf-8") as f:
         f.write(summary_text)
 
     print(summary_text)
@@ -137,8 +174,7 @@ def write_diff_json(added, removed, machine_changed):
     }
 
 
-    with open("diff.json", "w", encoding="utf-8") as f:
-        json.dump(diff, f, ensure_ascii=False, indent=2)
+    write_json(ROOT / "diff.json", diff)
 
 def update_history(added, removed, machine_changed):
     HISTORY = os.path.join(DATA_DIR, "updates.json")
@@ -171,84 +207,133 @@ def update_history(added, removed, machine_changed):
     # 7日保持
     history = dict(list(history.items())[:7])
 
-    with open(HISTORY, "w", encoding="utf-8") as f:
-        json.dump(history, f, ensure_ascii=False, indent=2)
+    write_json(HISTORY, history)
 
 def make_shop_id(shop):
     return f"{shop['pref']}|{shop['name']}|{shop['lat']}|{shop['lng']}"
 
-for i in range(1, 48):
-    area = f"JP-{i:02}"
-    list_url = f"{BASE}/list?area={area}"
-    print("取得中:", area)
-
-    soup = BeautifulSoup(requests.get(list_url).text, "html.parser")
-
+def fetch_list(session, area):
+    url = f"{BASE}/list?area={area}"
+    soup = get_page(session, url)
+    shops = []
+    seen = {}
     for dt in soup.find_all("dt"):
-        a = dt.find("a")
+        a = dt.find("a", href=True)
         if not a:
             continue
-
-        name = a.text.strip()
-        detail_url = BASE + "/" + a["href"].lstrip("./")
-
         address = machines = None
-        for sib in dt.find_next_siblings():
-            if sib.name == "dt":
-                break   # 次の店舗に入ったら終了
+        for sibling in dt.find_next_siblings():
+            if sibling.name == "dt":
+                break
+            if sibling.name == "dd":
+                if "address" in sibling.get("class", []):
+                    address = sibling.get_text(strip=True)
+                if "count" in sibling.get("class", []):
+                    match = re.search(r"\d+", sibling.get_text())
+                    machines = int(match.group()) if match else None
+        name = a.get_text(strip=True)
+        pref = extract_pref(address)
+        if not name or not pref or machines is None or machines < 1:
+            raise RuntimeError(f"店舗情報が不正です: {url} / {name}")
+        shop = {
+            "name": name, "address": address, "pref": pref,
+            "machines": machines, "area": area,
+            "detail_url": urljoin(url, a["href"]),
+        }
+        detail_url = shop["detail_url"]
+        if detail_url in seen:
+            if seen[detail_url] != shop:
+                raise RuntimeError(f"同じ詳細URLに異なる店舗情報があります: {detail_url}")
+            print(f"重複掲載を除外: {name} / {detail_url}", flush=True)
+            continue
+        seen[detail_url] = shop
+        shops.append(shop)
+    print(f"{area}: {len(shops)} 店舗", flush=True)
+    if not shops:
+        raise RuntimeError(f"店舗一覧が空です: {url}")
+    return shops
 
-            if sib.name == "dd":
-                if "address" in sib.get("class", []):
-                    address = sib.text.strip()
 
-                if "count" in sib.get("class", []):
-                    m = re.search(r"\d+", sib.text)
-                    machines = int(m.group()) if m else None
+def validate_counts(shops, baseline):
+    if not shops:
+        raise RuntimeError("取得結果が0件のため更新を中止します")
+    if baseline and len(shops) <= len(baseline) * (1 - MAX_DROP_RATIO):
+        raise RuntimeError(
+            f"全国: 店舗数が20%以上減少 ({len(baseline)} → {len(shops)})。更新を中止します"
+        )
+    areas = {s["area"] for s in shops}
+    for i in range(1, 48):
+        area = f"JP-{i:02}"
+        if area not in areas:
+            raise RuntimeError(f"{area}: 店舗が0件です")
 
-        # ---- Seleniumで座標取得 ----
-        lat = lng = None
-        driver.get(detail_url)
-        time.sleep(2)
 
-        try:
-            iframe = driver.find_element(By.ID, "gmap")
-            pref = extract_pref(address)
-            src = unescape(iframe.get_attribute("src"))
-            qs = parse_qs(urlparse(src).query)
-            lat, lng = map(float, qs["q"][0].split(","))
-        except:
-            pass
+def parse_coordinates(soup):
+    # 公式ページのルート検索ボタンには、地図と同じ座標が埋め込まれている。
+    # JavaScriptは実行せず、決まった形式の数値のみを読み取る。
+    button = soup.find(id="routesearch_btn")
+    sources = []
+    if button is not None:
+        match = re.fullmatch(
+            r"\s*routeSearch\(\s*([^,()]+)\s*,\s*([^,()]+)\s*\)\s*;?\s*",
+            button.get("onclick", ""),
+        )
+        if not match:
+            raise ValueError("ルート検索ボタンの座標形式が不正です")
+        sources.append(tuple(map(float, match.groups())))
+    iframe = soup.find(id="gmap")
+    if iframe is not None and iframe.get("src"):
+        query = parse_qs(urlparse(unescape(iframe["src"])).query)
+        if "q" in query:
+            sources.append(tuple(map(float, query["q"][0].split(","))))
+    if not sources:
+        raise ValueError("詳細ページに座標がありません")
+    for coordinates in sources:
+        if len(coordinates) != 2:
+            raise ValueError("座標の形式が不正です")
+        lat, lng = coordinates
+        if not (math.isfinite(lat) and math.isfinite(lng)
+                and -90 <= lat <= 90 and -180 <= lng <= 180):
+            raise ValueError("座標が範囲外です")
+        if coordinates != sources[0]:
+            raise ValueError("ルート検索と地図の座標が一致しません")
+    return sources[0]
 
-        shops.append({
-            "id": None,  # 後で付与
-            "name": name,
-            "address": address,
-            "pref": pref,
-            "machines": machines,
-            "lat": lat,
-            "lng": lng,
-            "area": area
-        })
 
-        print(f"  {name} | {machines}台 | {lat},{lng}")
+def fetch_coordinates(session, shop):
+    url = shop["detail_url"]
+    try:
+        soup = get_page(session, url)
+        lat, lng = parse_coordinates(soup)
+        shop.update(lat=lat, lng=lng)
+        shop["id"] = make_shop_id(shop)
+        del shop["detail_url"]
+        print(f"  {shop['name']} | {shop['machines']}台 | {lat},{lng}", flush=True)
+    except Exception as error:
+        raise RuntimeError(f"座標取得に失敗: {shop['name']} / {url}") from error
 
-driver.quit()
 
-for shop in shops:
-    shop["id"] = make_shop_id(shop)
+def main():
+    baseline = find_baseline()
+    shops = []
+    with create_session() as session:
+        for i in range(1, 48):
+            shops.extend(fetch_list(session, f"JP-{i:02}"))
+        # 全一覧の検証を先に済ませ、異常時は詳細ページを巡回しない。
+        validate_counts(shops, baseline)
+        for shop in shops:
+            fetch_coordinates(session, shop)
+    if len({s["id"] for s in shops}) != len(shops):
+        raise RuntimeError("店舗IDが重複しているため更新を中止します")
+    added, removed, machine_changed = diff_shops(baseline, shops)
+    # 取得・検証に成功するまでは既存ファイルに触らない。
+    write_json(PREV, {"shops": baseline})
+    write_json(LATEST, {"shops": shops})
+    write_summary(added, removed, machine_changed)
+    write_diff_json(added, removed, machine_changed)
+    update_history(added, removed, machine_changed)
+    print(f"完了: {len(shops)} 店舗", flush=True)
 
-with open(LATEST, "w", encoding="utf-8") as f:
-    json.dump({"shops": shops}, f, ensure_ascii=False, indent=2)
 
-print("完了:", len(shops), "店舗")
-
-# 差分取得
-prev_shops = load_shops(PREV)
-curr_shops = shops
-
-added, removed, machine_changed = diff_shops(prev_shops, curr_shops)
-
-write_summary(added, removed, machine_changed)
-write_diff_json(added, removed, machine_changed)
-update_history(added, removed, machine_changed)
-
+if __name__ == "__main__":
+    main()
