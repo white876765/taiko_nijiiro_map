@@ -10,6 +10,7 @@ import tempfile
 import json
 import re
 import os
+import sys
 
 BASE = "https://essential-truth-92204.appspot.com/S12"
 
@@ -84,6 +85,53 @@ def load_shops(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)["shops"]
 
+def migrate_baseline(prev, curr):
+    """旧IDを一意に対応するloc_idへ変換。旧履歴そのものは書き換えない。"""
+    def keys(shop):
+        area = shop.get("area")
+        return (
+            (area, shop.get("pref"), shop.get("name"), shop.get("lat"), shop.get("lng")),
+            (area, shop.get("name"), shop.get("address")),
+            (area, shop.get("address"), shop.get("lat"), shop.get("lng")),
+            (area, shop.get("name"), shop.get("lat"), shop.get("lng")),
+        )
+
+    indexes = [{} for _ in range(4)]
+    for shop in curr:
+        for index, key in zip(indexes, keys(shop)):
+            index.setdefault(key, set()).add(shop["id"])
+    migrated = []
+    previous_ids = {}
+    claimed = set()
+    for original in prev:
+        previous_id = original["id"]
+        if previous_id in previous_ids:
+            if previous_ids[previous_id] != original:
+                raise RuntimeError(f"比較元の同じIDに異なる店舗情報があります: {previous_id}")
+            continue  # 取得元の同一内容の重複掲載も移行時にまとめる。
+        previous_ids[previous_id] = original
+        shop = dict(original)
+        if shop.get("loc_id"):
+            shop["id"] = make_shop_id(shop)
+        else:
+            legacy_keys = keys(shop)
+            candidates = indexes[0].get(legacy_keys[0], set())
+            if not candidates:
+                candidates = set().union(*(index.get(key, set())
+                                           for index, key in zip(indexes[1:], legacy_keys[1:])))
+            if len(candidates) > 1:
+                raise RuntimeError(f"旧IDの移行先を一意に判定できません: {previous_id}")
+            if candidates:
+                shop["id"] = shop["loc_id"] = next(iter(candidates))
+                shop["legacy_id"] = previous_id
+            # 対応先のない旧店舗は旧IDのまま削除差分として残す。
+        if shop["id"] in claimed:
+            raise RuntimeError(f"複数の旧店舗が同じloc_idに対応しています: {shop['id']}")
+        claimed.add(shop["id"])
+        migrated.append(shop)
+    return migrated
+
+
 def diff_shops(prev, curr):
     prev_map = {s["id"]: s for s in prev}
     curr_map = {s["id"]: s for s in curr}
@@ -91,6 +139,7 @@ def diff_shops(prev, curr):
     added = []
     removed = []
     machine_changed = []
+    shop_changed = []
 
     # 追加 & 変更
     for shop_id, curr_shop in curr_map.items():
@@ -98,6 +147,17 @@ def diff_shops(prev, curr):
             added.append(curr_shop)
         else:
             prev_shop = prev_map[shop_id]
+            changes = {}
+            for field in ("name", "address", "pref"):
+                if prev_shop.get(field) != curr_shop.get(field):
+                    changes[field] = {"before": prev_shop.get(field), "after": curr_shop.get(field)}
+            before = [prev_shop.get("lat"), prev_shop.get("lng")]
+            after = [curr_shop.get("lat"), curr_shop.get("lng")]
+            if before != after:
+                changes["coordinates"] = {"before": before, "after": after}
+            if changes:
+                shop_changed.append({"id": shop_id, "name": curr_shop["name"],
+                                     "pref": curr_shop.get("pref"), "changes": changes})
             if prev_shop.get("machines") != curr_shop.get("machines"):
                 machine_changed.append({
                     "id": shop_id,
@@ -112,15 +172,16 @@ def diff_shops(prev, curr):
         if shop_id not in curr_map:
             removed.append(prev_shop)
 
-    return added, removed, machine_changed
+    return added, removed, machine_changed, shop_changed
 
-def write_summary(added, removed, machine_changed):
+def write_summary(added, removed, machine_changed, shop_changed=()):
     lines = []
     lines.append("## 太鼓の達人 設置店舗 更新結果\n")
 
     lines.append(f"- 追加店舗: {len(added)}")
     lines.append(f"- 削除店舗: {len(removed)}")
     lines.append(f"- 台数変更: {len(machine_changed)}\n")
+    lines.append(f"- 店舗情報変更: {len(shop_changed)}\n")
 
     # 追加店舗
     if added:
@@ -155,6 +216,13 @@ def write_summary(added, removed, machine_changed):
                 f"- 【{pref}】{c['name']}: {before} → {after}"
             )
 
+    if shop_changed:
+        labels = {"name": "店舗名", "address": "住所", "pref": "都道府県", "coordinates": "座標"}
+        lines.append("\n### 📝 店舗情報変更")
+        for change in shop_changed:
+            lines.append(f"- 【{change.get('pref', '不明')}】{change['name']}")
+            for field, values in change["changes"].items():
+                lines.append(f"  - {labels[field]}: {values['before']} → {values['after']}")
     summary_text = "\n".join(lines)
 
     with open(ROOT / "diff_summary.md", "w", encoding="utf-8") as f:
@@ -162,21 +230,22 @@ def write_summary(added, removed, machine_changed):
 
     print(summary_text)
 
-def write_diff_json(added, removed, machine_changed):
+def write_diff_json(added, removed, machine_changed, shop_changed=()):
     JST = timezone(timedelta(hours=9))
     today_jst = datetime.now(JST).date().isoformat()
     diff = {
         "date": today_jst,
-        "has_update": bool(added or removed or machine_changed),
+        "has_update": bool(added or removed or machine_changed or shop_changed),
         "added": added,
         "removed": removed,
-        "machine_changed": machine_changed
+        "machine_changed": machine_changed,
+        "shop_changed": list(shop_changed)
     }
 
 
     write_json(ROOT / "diff.json", diff)
 
-def update_history(added, removed, machine_changed):
+def update_history(added, removed, machine_changed, shop_changed=()):
     HISTORY = os.path.join(DATA_DIR, "updates.json")
 
     JST = timezone(timedelta(hours=9))
@@ -185,7 +254,8 @@ def update_history(added, removed, machine_changed):
     today_diff = {
         "added": added,
         "removed": removed,
-        "machine_changed": machine_changed
+        "machine_changed": machine_changed,
+        "shop_changed": list(shop_changed)
     }
 
     # 既存履歴読み込み
@@ -210,7 +280,10 @@ def update_history(added, removed, machine_changed):
     write_json(HISTORY, history)
 
 def make_shop_id(shop):
-    return f"{shop['pref']}|{shop['name']}|{shop['lat']}|{shop['lng']}"
+    loc_id = shop.get("loc_id")
+    if not isinstance(loc_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", loc_id):
+        raise ValueError(f"loc_idが不正です: {loc_id!r}")
+    return loc_id
 
 
 def last_changed_date(fetched_at, has_changes):
@@ -225,7 +298,7 @@ def last_changed_date(fetched_at, has_changes):
         history = json.loads(history_path.read_text(encoding="utf-8"))
         return next((day for day in sorted(history, reverse=True)
                      if any(history[day].get(key) for key in
-                            ("added", "removed", "machine_changed"))), None)
+                            ("added", "removed", "machine_changed", "shop_changed"))), None)
     return None
 
 def fetch_list(session, area):
@@ -256,13 +329,22 @@ def fetch_list(session, area):
             "machines": machines, "area": area,
             "detail_url": urljoin(url, a["href"]),
         }
-        detail_url = shop["detail_url"]
-        if detail_url in seen:
-            if seen[detail_url] != shop:
-                raise RuntimeError(f"同じ詳細URLに異なる店舗情報があります: {detail_url}")
-            print(f"重複掲載を除外: {name} / {detail_url}", flush=True)
+        parsed = urlparse(shop["detail_url"])
+        if (parsed.scheme, parsed.netloc, parsed.path) != ("https", urlparse(BASE).netloc, "/S12/detail"):
+            raise RuntimeError(f"店舗詳細URLが不正です: {shop['detail_url']}")
+        loc_ids = parse_qs(parsed.query).get("loc_id", [])
+        if len(loc_ids) != 1:
+            raise RuntimeError(f"詳細URLのloc_idが不正です: {shop['detail_url']}")
+        shop["loc_id"] = loc_ids[0]
+        shop["id"] = make_shop_id(shop)
+        if shop["id"] in seen:
+            # クエリの順序等は店舗情報の差とみなさない。
+            comparable = {k: v for k, v in shop.items() if k != "detail_url"}
+            if seen[shop["id"]] != comparable:
+                raise RuntimeError(f"同じloc_idに異なる店舗情報があります: {shop['id']}")
+            print(f"重複掲載を除外: {name} / {shop['detail_url']}", flush=True)
             continue
-        seen[detail_url] = shop
+        seen[shop["id"]] = {k: v for k, v in shop.items() if k != "detail_url"}
         shops.append(shop)
     print(f"{area}: {len(shops)} 店舗", flush=True)
     if not shops:
@@ -330,6 +412,8 @@ def fetch_coordinates(session, shop):
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     baseline = find_baseline()
     shops = []
     with create_session() as session:
@@ -341,15 +425,16 @@ def main():
             fetch_coordinates(session, shop)
     if len({s["id"] for s in shops}) != len(shops):
         raise RuntimeError("店舗IDが重複しているため更新を中止します")
-    added, removed, machine_changed = diff_shops(baseline, shops)
+    baseline = migrate_baseline(baseline, shops)
+    added, removed, machine_changed, shop_changed = diff_shops(baseline, shops)
     # 取得・検証に成功するまでは既存ファイルに触らない。
     fetched_at = datetime.now(timezone(timedelta(hours=9))).isoformat(timespec="seconds")
-    changed_date = last_changed_date(fetched_at, bool(added or removed or machine_changed))
+    changed_date = last_changed_date(fetched_at, bool(added or removed or machine_changed or shop_changed))
     write_json(PREV, {"shops": baseline})
     write_json(LATEST, {"fetched_at": fetched_at, "last_changed_date": changed_date, "shops": shops})
-    write_summary(added, removed, machine_changed)
-    write_diff_json(added, removed, machine_changed)
-    update_history(added, removed, machine_changed)
+    write_summary(added, removed, machine_changed, shop_changed)
+    write_diff_json(added, removed, machine_changed, shop_changed)
+    update_history(added, removed, machine_changed, shop_changed)
     print(f"完了: {len(shops)} 店舗", flush=True)
 
 

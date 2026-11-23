@@ -135,11 +135,27 @@ function enableMapInteraction() { map.dragging.enable(); map.touchZoom.enable();
 function updateMapInteractionState() { if (!isMobile()) return; isAnyPanelOpen() ? disableMapInteraction() : enableMapInteraction(); }
 
 // ===== 更新UI =====
+function escapeHTML(value) {
+  return String(value ?? "不明").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
+}
+
 function buildUpdateHTML(d) {
   const html=[];
   if (d.added?.length) { html.push("<strong>🟢追加店舗</strong><ul>"+d.added.map(s=>`<li>【${s.pref??"不明"}】${s.name}</li>`).join("")+"</ul>"); }
   if (d.removed?.length) { html.push("<strong>🔴削除店舗</strong><ul>"+d.removed.map(s=>`<li>【${s.pref??"不明"}】${s.name}</li>`).join("")+"</ul>"); }
   if (d.machine_changed?.length) { html.push("<strong>🟡台数変更</strong><ul>"+d.machine_changed.map(s=>`<li>【${s.pref??"不明"}】${s.name}：${s.before} → ${s.after}</li>`).join("")+"</ul>"); }
+  if (d.shop_changed?.length) {
+    const labels = { name: "店舗名", address: "住所", pref: "都道府県", coordinates: "座標" };
+    const display = value => escapeHTML(Array.isArray(value) ? value.join(", ") : value);
+    html.push("<strong>📝店舗情報変更</strong><ul>" + d.shop_changed.map(shop =>
+      `<li>【${escapeHTML(shop.pref)}】${escapeHTML(shop.name)}<br>` +
+      Object.entries(shop.changes).map(([field, values]) =>
+        `${escapeHTML(labels[field] ?? field)}：${display(values.before)} → ${display(values.after)}`
+      ).join("<br>") + "</li>"
+    ).join("") + "</ul>");
+  }
   return html.join("");
 }
 
@@ -165,7 +181,7 @@ function jstDate(date) {
 }
 
 function hasChanges(update) {
-  return Boolean(update?.added?.length || update?.removed?.length || update?.machine_changed?.length);
+  return Boolean(update?.added?.length || update?.removed?.length || update?.machine_changed?.length || update?.shop_changed?.length);
 }
 
 function renderUpdateInfo(history, fetchedAt, lastChangedDate, now = new Date()) {
@@ -195,7 +211,8 @@ function renderUpdateInfo(history, fetchedAt, lastChangedDate, now = new Date())
   summary.textContent = latestChangeDate ? [
     `🟢追加 ${update.added?.length ?? 0}`,
     `🔴削除 ${update.removed?.length ?? 0}`,
-    `🟡台数変更 ${update.machine_changed?.length ?? 0}`
+    `🟡台数変更 ${update.machine_changed?.length ?? 0}`,
+    ...(update.shop_changed?.length ? [`📝店舗情報変更 ${update.shop_changed.length}`] : [])
   ].join(" / ") : "";
   details.innerHTML = buildUpdateHTML(update);
   toggle.style.display = latestChangeDate ? "inline-block" : "none";

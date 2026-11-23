@@ -194,3 +194,29 @@ test('initial data rendering preserves a view changed while data was loading', a
   assert.equal(view.cluster.layers.length, 3);
   assert.equal(view.viewChanges.length, 0);
 });
+
+test('metadata-only changes appear in the summary and history with escaped values', async () => {
+  const view = app();
+  const update = { added: [], removed: [], machine_changed: [], shop_changed: [{
+    id: 'loc-1', name: 'New <name>', pref: '東京都', changes: {
+      name: { before: 'Old & name', after: 'New <name>' },
+      address: { before: 'Old address', after: 'New address' },
+      coordinates: { before: [35, 139], after: [36, 140] }
+    }
+  }] };
+  view.respond('data/shops_latest.json', { shops });
+  view.respond('data/updates.json', { '2026-11-23': update });
+  await view.ready();
+  assert.match(view.elements.get('lastChanged').textContent, /2026-11-23/);
+  assert.match(view.elements.get('updateSummary').textContent, /店舗情報変更 1/);
+  const content = view.elements.get('updateDetails').innerHTML;
+  assert.match(content, /New &lt;name&gt;/);
+  assert.match(content, /Old &amp; name/);
+  assert.match(content, /住所/);
+  assert.match(content, /座標：35, 139 → 36, 140/);
+  assert.ok(!content.includes('New <name>'));
+  const select = vm.runInContext('historySelect', view.context);
+  select.value = '2026-11-23';
+  select.onchange();
+  assert.match(view.elements.get('modalDetails').innerHTML, /店舗情報変更/);
+});
