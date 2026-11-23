@@ -46,7 +46,7 @@ function app() {
 }
 
 for (const first of ['shops', 'history']) {
-  test(`initial highlight works when ${first} loads first`, async () => {
+  test(`all markers stay default blue when ${first} loads first`, async () => {
     const view = app();
     const respondShops = () => view.respond('data/shops_latest.json', {
       shops, fetched_at: '2026-11-23T01:02:03+09:00', last_changed_date: '2026-11-22'
@@ -55,19 +55,18 @@ for (const first of ['shops', 'history']) {
     if (first === 'shops') { respondShops(); await Promise.resolve(); respondHistory(); }
     else { respondHistory(); await Promise.resolve(); respondShops(); }
     await view.ready();
-    assert.match(view.cluster.layers[0].icon.iconUrl, /green-dot/);
-    assert.match(view.cluster.layers[1].icon.iconUrl, /orange-dot/);
-    assert.equal(view.cluster.layers[2].icon.iconUrl, undefined);
+    assert.equal(view.cluster.layers.length, 3);
+    const defaultIcon = vm.runInContext("normalIcon", view.context);
+    assert.ok(view.cluster.layers.every(layer => layer.icon === defaultIcon));
     assert.match(view.elements.get('lastFetched').textContent, /2026\/11\/23 01:02/);
     assert.match(view.elements.get('lastChanged').textContent, /2026-11-22/);
-    assert.match(view.elements.get('markerLegend').textContent, /2026-11-22/);
     const select = vm.runInContext('historySelect', view.context);
     select.value = '';
     select.onchange(); // Selecting the placeholder must not throw.
     select.value = '2026-11-23';
     select.onchange();
     assert.match(view.elements.get('modalDetails').innerHTML, /変更なし/);
-    assert.match(view.cluster.layers[0].icon.iconUrl, /green-dot/);
+    assert.ok(view.cluster.layers.every(layer => layer.icon === defaultIcon));
   });
 }
 
@@ -79,7 +78,6 @@ test('JST date boundary detects an out-of-date fetch', async () => {
   vm.runInContext(`renderUpdateInfo({}, '2026-11-22T14:59:00Z', '2026-11-01', new Date('2026-11-22T15:01:00Z'))`, view.context);
   assert.match(view.elements.get('fetchStatus').textContent, /本日はまだ取得/);
   assert.match(view.elements.get('lastChanged').textContent, /2026-11-01/);
-  assert.equal(view.elements.get('markerLegend').textContent, '');
   vm.runInContext(`renderUpdateInfo({}, '2026-11-22T15:00:00Z', null, new Date('2026-11-22T15:01:00Z'))`, view.context);
   assert.equal(view.elements.get('fetchStatus').textContent, '');
 });

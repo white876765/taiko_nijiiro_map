@@ -68,14 +68,37 @@ html, body {
   top: 10px;
   right: 10px;
   z-index: 1200;
-  background: #fff3cd;
-  border: 1px solid #ffeeba;
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  max-width: 320px;
-  box-shadow: 0 2px 6px rgba(0,0,0,.2);
+  width: 300px;
+  box-sizing: border-box;
+  color: #243247;
+  background: #fff;
+  border: 1px solid #dce3eb;
+  border-radius: 12px;
+  padding: 14px;
+  font: 13px/1.6 system-ui, sans-serif;
+  box-shadow: 0 3px 14px rgba(24, 39, 60, .16);
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
 }
+.update-heading { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+.update-meta { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 5px 10px; margin: 0; }
+.update-meta dt { color: #64748b; }
+.update-meta dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+#fetchStatus:not(:empty) { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: #fff4d6; color: #785000; }
+#summaryDate { margin-top: 12px; color: #64748b; font-size: 12px; }
+#updateSummary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 5px; }
+.update-count { padding: 6px 2px; background: #f1f5f9; border-radius: 7px; text-align: center; font-size: 11px; }
+.update-count b { display: block; color: #243247; font-size: 19px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+.update-count.added { background: #edf8f0; color: #237644; }
+.update-count.removed { background: #fff0f0; color: #a13c3c; }
+.update-count.changed { background: #fff5e6; color: #945908; }
+.update-more { margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 9px; }
+.update-more > summary { cursor: pointer; color: #365e88; font-weight: 600; }
+#updateToggle { width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #cbd8e6; border-radius: 7px; background: #f5f9ff; color: #24558b; font: inherit; cursor: pointer; }
+#updateToggle:hover { background: #eaf2fd; }
+#updateToggle:focus-visible, .update-more > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+#updateHistory { margin-top: 12px; }
+#updateHistory select { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #243247; font: inherit; }
 
 @media (max-width: 768px) {
 
@@ -99,12 +122,12 @@ html, body {
 
   #updateNotice {
     position: fixed;
-    top: 10px;
-    right: 10px;              /* ← 右固定 */
-    max-width: 65vw;          /* 画面幅に応じて縮む */
+    width: min(280px, calc(100vw - 106px));
+    padding: 11px;
     font-size: 12px;
-    z-index: 1200;
   }
+  .update-meta { grid-template-columns: 54px minmax(0, 1fr); gap: 5px 7px; }
+  .update-count b { font-size: 17px; }
 
   #updateDetails {
     margin-top: 8px;
@@ -205,44 +228,22 @@ html, body {
   </select>
 </div>
 
-<div id="updateNotice" style="display:none;">
-  <strong>店舗データの更新状況</strong>
-  <div id="lastFetched" style="margin-top:6px;"></div>
-  <div id="fetchStatus" style="margin-top:4px;"></div>
-  <div id="lastChanged" style="margin-top:4px;"></div>
-  <div id="markerLegend" style="margin-top:4px;"></div>
-
-  <!-- サマリー -->
-  <div id="updateSummary" style="margin-top:6px;"></div>
-
-  <!-- トグル（これ1つだけ） -->
-  <div
-    id="updateToggle"
-    style="margin-top:6px; cursor:pointer; color:#007bff;"
-  >
-    ▶ 表示する
-  </div>
-
-  <!-- 一覧 -->
-  <div
-    id="updateDetails"
-    style="
-      display:none;
-      margin-top:6px;
-      max-height:260px;
-      overflow-y:auto;
-      overflow-x:hidden;
-      border-top:1px solid #ddd;
-      padding-top:6px;
-      white-space:normal;
-      word-break:break-word;
-    "
-  ></div>
-
-  <hr>
-
-  <div id="updateHistory"></div>
-</div>
+<aside id="updateNotice" style="display:none;" aria-label="店舗データの更新状況">
+  <h2 class="update-heading">更新状況</h2>
+  <dl class="update-meta">
+    <dt>最終取得</dt><dd id="lastFetched"></dd>
+    <dt>最終変更</dt><dd id="lastChanged"></dd>
+  </dl>
+  <div id="fetchStatus" role="status"></div>
+  <div id="summaryDate"></div>
+  <div id="updateSummary"></div>
+  <details class="update-more">
+    <summary>詳細・過去の履歴</summary>
+    <button type="button" id="updateToggle">変更内容を見る</button>
+    <div id="updateDetails" hidden></div>
+    <div id="updateHistory"></div>
+  </details>
+</aside>
 
 <div id="updateModal">
   <div id="updateModalContent">
