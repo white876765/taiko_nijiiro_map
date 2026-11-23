@@ -48,6 +48,31 @@ html, body {
   font-weight: bold;
 }
 
+.shop-popup-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.leaflet-popup-content a.shop-official { display: inline-block; margin-top: 8px; color: #64748b; font-size: 12px; text-underline-offset: 2px; }
+.leaflet-popup-content a.shop-official:hover { color: #1967d2; }
+.leaflet-popup-content a.shop-official:focus-visible { outline: 2px solid #1967d2; outline-offset: 2px; }
+.leaflet-popup-content a.shop-directions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding: 5px 9px;
+  border: 1px solid #c6d8f4;
+  border-radius: 6px;
+  background: #f3f7ff;
+  color: #1967d2;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-decoration: none;
+}
+.leaflet-popup-content a.shop-directions:hover { background: #e6efff; }
+.leaflet-popup-content a.shop-directions:focus-visible { outline: 2px solid #1967d2; outline-offset: 2px; }
+.shop-directions svg { flex-shrink: 0; }
+
 .mobile-only {
   display: none;
 }
@@ -255,7 +280,7 @@ html, body {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-<script src="map.js?v=f87eda8d24dd"></script>
+<script src="map.js?v=1189e0055af3"></script>
 
 </body>
 </html>

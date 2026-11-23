@@ -92,7 +92,20 @@ function renderMap({ fitView = false } = {}) {
     if (!matchMachineFilter(shop.machines, filters)) continue;
     if (keyword && !shop.name.toLowerCase().includes(keyword)) continue;
 
-    const marker = L.marker([shop.lat, shop.lng], { icon: normalIcon }).bindPopup(`<strong>${shop.name}</strong><br>${shop.address}<br>${shop.machines}台`);
+    const directionsURL = "https://www.google.com/maps/dir/?api=1&destination=" +
+      encodeURIComponent(`${shop.lat},${shop.lng}`);
+    const officialLink = typeof shop.loc_id === "string" && /^[A-Za-z0-9_-]+$/.test(shop.loc_id)
+      ? `<a class="shop-official" href="https://essential-truth-92204.appspot.com/S12/detail?loc_id=${encodeURIComponent(shop.loc_id)}"` +
+        ` target="_blank" rel="noopener noreferrer" aria-label="公式の設置店舗情報（新しいタブで開く）">公式の設置店舗情報 ↗</a>`
+      : "";
+    const popup = `<strong>${escapeHTML(shop.name)}</strong><br>${escapeHTML(shop.address)}` +
+      `<div class="shop-popup-actions"><span>${escapeHTML(shop.machines)}台</span>` +
+      `<a class="shop-directions" href="${escapeHTML(directionsURL)}" target="_blank" rel="noopener noreferrer"` +
+      ` aria-label="経路検索（Googleマップ、新しいタブで開く）">` +
+      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"` +
+      ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">` +
+      `<path d="M5 20v-8a4 4 0 0 1 4-4h10M15 4l4 4-4 4"/></svg><span>経路検索</span></a></div>` + officialLink;
+    const marker = L.marker([shop.lat, shop.lng], { icon: normalIcon }).bindPopup(popup);
     cluster.addLayer(marker);
     count++;
     total += shop.machines||0;

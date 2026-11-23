@@ -58,7 +58,8 @@ function app() {
     },
     L: { map: () => map, control, markerClusterGroup: () => cluster,
       tileLayer: () => ({ addTo() {} }), Icon: { Default: function () {} }, icon: options => options,
-      marker: (coordinates, options) => ({ coordinates, icon: options.icon, bindPopup() { return this; } }) }
+      marker: (coordinates, options) => ({ coordinates, icon: options.icon,
+        bindPopup(content) { this.popup = content; return this; } }) }
   });
   vm.runInContext(source, context);
   return { elements, cluster, context, map, viewChanges, checkboxes,
@@ -219,4 +220,58 @@ test('metadata-only changes appear in the summary and history with escaped value
   select.value = '2026-11-23';
   select.onchange();
   assert.match(view.elements.get('modalDetails').innerHTML, /店舗情報変更/);
+});
+
+test('directions button opens the shop coordinates without preset origin or travel mode', async () => {
+  const view = app();
+  const shop = { ...shops[0], name: '店 <A>', address: '住所 & ビル', lat: 43.054536, lng: 141.354524 };
+  view.respond('data/shops_latest.json', { shops: [shop] });
+  view.respond('data/updates.json', {});
+  await view.ready();
+  const popup = view.cluster.layers[0].popup;
+  assert.equal((popup.match(/<a\b/g) ?? []).length, 1);
+  assert.match(popup, /class="shop-directions"/);
+  assert.match(popup, /aria-label="経路検索（Googleマップ、新しいタブで開く）"/);
+  assert.match(popup, /<svg[^>]*aria-hidden="true"/);
+  assert.match(popup, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(popup, /店 &lt;A&gt;/);
+  assert.match(popup, /住所 &amp; ビル/);
+  const url = new URL(popup.match(/href="([^"]+)"/)[1].replaceAll('&amp;', '&'));
+  assert.equal(url.origin, 'https://www.google.com');
+  assert.equal(url.pathname, '/maps/dir/');
+  assert.equal(url.searchParams.get('api'), '1');
+  assert.equal(url.searchParams.get('destination'), '43.054536,141.354524');
+  assert.equal(url.searchParams.has('origin'), false);
+  assert.equal(url.searchParams.has('travelmode'), false);
+});
+
+test('popup links to the official store detail using loc_id and keeps machine count in the actions row', async () => {
+  const view = app();
+  const shop = { ...shops[0], id: 'store_123-A', loc_id: 'store_123-A' };
+  view.respond('data/shops_latest.json', { shops: [shop] });
+  view.respond('data/updates.json', {});
+  await view.ready();
+  const popup = view.cluster.layers[0].popup;
+  assert.equal((popup.match(/<a\b/g) ?? []).length, 2);
+  assert.match(popup, /shop-popup-actions"><span>2台<\/span>/);
+  assert.match(popup, /class="shop-official"/);
+  assert.match(popup, /公式の設置店舗情報 ↗/);
+  const official = popup.match(/<a class="shop-official"[^>]+>/)[0];
+  const url = new URL(official.match(/href="([^"]+)"/)[1]);
+  assert.equal(url.origin, 'https://essential-truth-92204.appspot.com');
+  assert.equal(url.pathname, '/S12/detail');
+  assert.equal(url.searchParams.get('loc_id'), shop.loc_id);
+  assert.match(official, /target="_blank" rel="noopener noreferrer"/);
+  assert.ok(popup.indexOf('class="shop-official"') > popup.indexOf('class="shop-directions"'));
+});
+
+test('legacy or invalid loc_id does not produce a broken official link', async () => {
+  for (const loc_id of [undefined, '', 'bad"><script>']) {
+    const view = app();
+    view.respond('data/shops_latest.json', { shops: [{ ...shops[0], loc_id }] });
+    view.respond('data/updates.json', {});
+    await view.ready();
+    assert.ok(!view.cluster.layers[0].popup.includes('shop-official'));
+    assert.match(view.cluster.layers[0].popup, /shop-directions/);
+  }
 });
